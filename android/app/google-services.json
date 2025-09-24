@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "638995538159",
+    "project_id": "consignes-interactives",
+    "storage_bucket": "consignes-interactives.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:638995538159:android:485e3a58939ed80fc4bb1a",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2sG1HfbICs2sK72fepxG5-9sWDh93hZA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,68 @@
+name: flutter_application_1
+description: A new Flutter project.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.19.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Mettre à jour vers des versions plus récentes.
+  # Vérifiez les dernières versions stables sur pub.dev !
+  firebase_core: ^2.27.0  # Exemple de version récente
+  cloud_firestore: ^4.15.8 # Exemple de version récente de la série 4.x
+  # firebase_auth devrait aussi être mis à jour pour la compatibilité
+  firebase_auth: ^4.17.8 # Exemple de version récente
+
+  shared_preferences: ^2.5.3 # Peut aussi être mis à jour si une nouvelle version est disponible
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: "^0.13.1" # Version la plus récente au moment de l'écriture
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/oms-logo.png
+    - assets/images/icon.png   # Assurez-vous que votre icône principale est ici
+
+# flutter_launcher_icons configuration
+# Doit être au même niveau d'indentation que 'name', 'flutter', etc.
+flutter_launcher_icons:
+  # OBLIGATOIRE : Chemin vers votre image d'icône source (par exemple, un PNG 1024x1024)
+  # Assurez-vous que cette image existe à ce chemin dans votre projet.
+  image_path: "assets/images/icon.png"
+
+  # Configuration Android
+  android: "launcher_icon" # Nom du fichier icône généré pour Android (sans extension)
+  min_sdk_android: 21      # SDK minimum pour les icônes adaptatives (facultatif mais recommandé)
+
+  # Configuration pour les icônes adaptatives Android (FORTEMENT RECOMMANDÉ)
+  # Si votre image_path est déjà conçue comme un premier plan (avec transparence),
+  # vous pouvez la réutiliser ici. Sinon, créez une image de premier plan séparée.
+  # adaptive_icon_foreground: "assets/images/icon_foreground.png" # Image de premier plan
+  adaptive_icon_background: "#FFFFFF" # Couleur de fond (par exemple, blanc) ou chemin vers une image de fond
+    # Si vous ne spécifiez pas adaptive_icon_foreground,
+  # image_path sera utilisé pour le premier plan.
+
+  # Configuration iOS (true pour générer, false pour ne pas le faire)
+  ios: true
+  # remove_alpha_ios: true # Décommentez si votre icône iOS a des problèmes de transparence
+
+# ... (reste de votre pubspec.yaml inchangé si applicable, par exemple les polices) ...
+#  fonts:
+#    - family: Schyler
+#      fonts:
+#        - asset: fonts/Schyler-Regular.ttf
+#        - asset: fonts/Schyler-Italic.ttf
+#          style: italic
+#    - family: Trajan Pro
+#      fonts:
+#        - asset: fonts/TrajanPro.ttf
+#        - asset: fonts/TrajanPro_Bold.ttf
+#          weight: 700

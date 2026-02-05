@@ -1,7 +1,8 @@
 // lib/screens/role_selection_screen.dart
 import 'package:flutter/material.dart'; // Fournit debugPrint et Key
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart' as fs; // Alias pour cohérence
+import 'package:cloud_firestore/cloud_firestore.dart'
+    as fs; // Alias pour cohérence
 
 import 'home_screen.dart';
 import 'login_chantier_screen.dart';
@@ -29,7 +30,7 @@ class RoleSelectionScreen extends StatefulWidget {
     Navigator.pushAndRemoveUntil(
       externalContext,
       MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
-          (Route<dynamic> route) => false,
+      (Route<dynamic> route) => false,
     );
   }
 
@@ -68,8 +69,8 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
       if (userDoc.exists && userDoc.data() != null) {
         var data = userDoc.data() as Map<String, dynamic>;
         if (data.containsKey('roles') && data['roles'] is List) {
-          List<String> roles = List<String>.from(
-              data['roles'].map((role) => role.toString()));
+          List<String> roles =
+              List<String>.from(data['roles'].map((role) => role.toString()));
           return roles;
         }
       }
@@ -100,8 +101,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
     if (currentUser != null) {
       // Remplacé print par debugPrint
       debugPrint(
-          "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: Utilisateur Firebase connecté. UID: ${currentUser
-              .uid}");
+          "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: Utilisateur Firebase connecté. UID: ${currentUser.uid}");
       List<String> roles = await _getUserRolesFromFirestore(currentUser.uid);
 
       if (!mounted) return;
@@ -131,7 +131,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const HomeScreen()),
-              (Route<dynamic> route) => false,
+          (Route<dynamic> route) => false,
         );
         return;
       } else {
@@ -140,8 +140,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
             : "données chef d'équipe (numeroEquipe/poste_actuel) invalides";
         // Remplacé print par debugPrint
         debugPrint(
-            "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: Utilisateur Firebase connecté (UID: ${currentUser
-                .uid}) mais $causeAffichageOptions. Affichage options.");
+            "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: Utilisateur Firebase connecté (UID: ${currentUser.uid}) mais $causeAffichageOptions. Affichage options.");
       }
     } else {
       // Remplacé print par debugPrint
@@ -320,8 +319,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
         }
         // Remplacé print par debugPrint
         debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Connexion anonyme réussie/utilisée. UID: ${user
-                ?.uid}");
+            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Connexion anonyme réussie/utilisée. UID: ${user?.uid}");
 
         if (user != null) {
           fs.DocumentReference userDocRef = fs.FirebaseFirestore.instance
@@ -338,19 +336,17 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
             'roles': ['chef_equipe'],
             'poste_actuel': selectedPoste,
             'numeroEquipe': selectedTeamNumber,
-            'derniere_selection_poste_equipe':
-            fs.FieldValue.serverTimestamp(),
+            'derniere_selection_poste_equipe': fs.FieldValue.serverTimestamp(),
           };
           await userDocRef.set(userDataToSet, fs.SetOptions(merge: true));
           // Remplacé print par debugPrint
           debugPrint(
-              "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Document pour chef d'équipe ($nomCompletEquipePoste) traité. UID: ${user
-                  .uid}. Navigation.");
+              "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Document pour chef d'équipe ($nomCompletEquipePoste) traité. UID: ${user.uid}. Navigation.");
           if (mounted) {
             Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => const HomeScreen()),
-                  (Route<dynamic> route) => false,
+              (Route<dynamic> route) => false,
             );
           }
           return;
@@ -382,7 +378,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
             Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => const HomeScreen()),
-                  (Route<dynamic> route) => false,
+              (Route<dynamic> route) => false,
             );
           }
           return;
@@ -401,13 +397,14 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
           _isProcessingLogin = false;
         });
       }
-    } catch (e, s) { // Ajout de la StackTrace s
+    } catch (e, s) {
+      // Ajout de la StackTrace s
       // Remplacé print par debugPrint
       debugPrint(
           "[RoleSelectionScreen] ERREUR pendant _handleLoginAttemptForRoleType($roleType): $e\nStackTrace: $s");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Erreur: ${e.toString()}")));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Erreur: ${e.toString()}")));
         setState(() {
           _isProcessingLogin = false;
         });
@@ -417,13 +414,10 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   Widget _buildRoleButton(BuildContext context,
       {required String text,
-        required Color color,
-        Color textColor = Colors.white,
-        required String roleKey}) {
-    final double buttonWidth = MediaQuery
-        .of(context)
-        .size
-        .width * 0.40;
+      required Color color,
+      Color textColor = Colors.white,
+      required String roleKey}) {
+    final double buttonWidth = MediaQuery.of(context).size.width * 0.40;
     const double buttonHeight = 35.0;
 
     return ElevatedButton(
@@ -439,8 +433,8 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
       onPressed: _isProcessingLogin
           ? null
           : () {
-        _handleLoginAttemptForRoleType(roleKey);
-      },
+              _handleLoginAttemptForRoleType(roleKey);
+            },
       child: Text(text),
     );
   }
@@ -534,7 +528,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
               left: 12.0,
               bottom: 12.0,
               child: Text(
-                "V.BETA 1.0",
+                "V.BETA 2.0",
                 // Vous pouvez envisager de rendre cela dynamique avec package_info_plus
                 style: TextStyle(
                   color: Colors.grey.shade700,

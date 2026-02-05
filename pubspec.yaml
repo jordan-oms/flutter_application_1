@@ -11,10 +11,11 @@ dependencies:
     sdk: flutter
   # Mettre à jour vers des versions plus récentes.
   # Vérifiez les dernières versions stables sur pub.dev !
-  firebase_core: ^2.27.0  # Exemple de version récente
-  cloud_firestore: ^4.15.8 # Exemple de version récente de la série 4.x
+  firebase_core: ^4.4.0  # Exemple de version récente
+  cloud_firestore: ^6.1.2 # Exemple de version récente de la série 4.x
   # firebase_auth devrait aussi être mis à jour pour la compatibilité
-  firebase_auth: ^4.17.8 # Exemple de version récente
+  firebase_auth: ^6.1.4 # Exemple de version récente
+  local_auth: ^3.0.0
 
   shared_preferences: ^2.5.3 # Peut aussi être mis à jour si une nouvelle version est disponible
   cupertino_icons: ^1.0.6
@@ -22,8 +23,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
-  flutter_launcher_icons: "^0.13.1" # Version la plus récente au moment de l'écriture
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4 # Version la plus récente au moment de l'écriture
 
 flutter:
   uses-material-design: true

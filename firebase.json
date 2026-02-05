@@ -14,9 +14,9 @@
           "configurations": {
             "android": "1:638995538159:android:485e3a58939ed80fc4bb1a",
             "ios": "1:638995538159:ios:36444a1b9cf5627bc4bb1a",
-            "macos": "1:638995538159:ios:36444a1b9cf5627bc4bb1a",
             "web": "1:638995538159:web:43cf9c4bcb235cacc4bb1a",
-            "windows": "1:638995538159:web:9cac68fbbf39e9f6c4bb1a"
+            "windows": "1:638995538159:web:9cac68fbbf39e9f6c4bb1a",
+            "macos": "1:638995538159:ios:36444a1b9cf5627bc4bb1a"
           }
         }
       }
@@ -37,5 +37,20 @@
         "npm --prefix \"$RESOURCE_DIR\" run lint"
       ]
     }
-  ]
+  ],
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
 }
+

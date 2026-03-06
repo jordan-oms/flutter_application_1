@@ -4,66 +4,49 @@ publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  sdk: ">=2.19.0 <3.0.0"
+  sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  # Mettre à jour vers des versions plus récentes.
-  # Vérifiez les dernières versions stables sur pub.dev !
-  firebase_core: ^4.4.0  # Exemple de version récente
-  cloud_firestore: ^6.1.2 # Exemple de version récente de la série 4.x
-  # firebase_auth devrait aussi être mis à jour pour la compatibilité
-  firebase_auth: ^6.1.4 # Exemple de version récente
-  local_auth: ^3.0.0
 
-  shared_preferences: ^2.5.3 # Peut aussi être mis à jour si une nouvelle version est disponible
+  firebase_core: ^4.4.0
+  cloud_firestore: ^6.1.2
+  firebase_auth: ^6.1.4
+  local_auth: ^3.0.0
+  excel: ^4.0.6
+  path_provider: ^2.1.2
+  open_file_plus: ^3.4.1
+  shared_preferences: ^2.5.3
   cupertino_icons: ^1.0.6
+  file_picker: ^10.3.10
+  file_saver: ^0.3.1  # <--- AJOUTEZ CETTE LIGNE
+  flutter_svg: ^2.2.3
+
+
+
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.14.4 # Version la plus récente au moment de l'écriture
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/oms-logo.png
-    - assets/images/icon.png   # Assurez-vous que votre icône principale est ici
+    - assets/images/icon.png
+    - assets/images/icon1.png
+    - assets/images/chantier+.png
+    - assets/images/chantier-.svg
 
-# flutter_launcher_icons configuration
-# Doit être au même niveau d'indentation que 'name', 'flutter', etc.
+
 flutter_launcher_icons:
-  # OBLIGATOIRE : Chemin vers votre image d'icône source (par exemple, un PNG 1024x1024)
-  # Assurez-vous que cette image existe à ce chemin dans votre projet.
   image_path: "assets/images/icon.png"
 
-  # Configuration Android
-  android: "launcher_icon" # Nom du fichier icône généré pour Android (sans extension)
-  min_sdk_android: 21      # SDK minimum pour les icônes adaptatives (facultatif mais recommandé)
+  android: "launcher_icon"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"
 
-  # Configuration pour les icônes adaptatives Android (FORTEMENT RECOMMANDÉ)
-  # Si votre image_path est déjà conçue comme un premier plan (avec transparence),
-  # vous pouvez la réutiliser ici. Sinon, créez une image de premier plan séparée.
-  # adaptive_icon_foreground: "assets/images/icon_foreground.png" # Image de premier plan
-  adaptive_icon_background: "#FFFFFF" # Couleur de fond (par exemple, blanc) ou chemin vers une image de fond
-    # Si vous ne spécifiez pas adaptive_icon_foreground,
-  # image_path sera utilisé pour le premier plan.
-
-  # Configuration iOS (true pour générer, false pour ne pas le faire)
   ios: true
-  # remove_alpha_ios: true # Décommentez si votre icône iOS a des problèmes de transparence
-
-# ... (reste de votre pubspec.yaml inchangé si applicable, par exemple les polices) ...
-#  fonts:
-#    - family: Schyler
-#      fonts:
-#        - asset: fonts/Schyler-Regular.ttf
-#        - asset: fonts/Schyler-Italic.ttf
-#          style: italic
-#    - family: Trajan Pro
-#      fonts:
-#        - asset: fonts/TrajanPro.ttf
-#        - asset: fonts/TrajanPro_Bold.ttf
-#          weight: 700

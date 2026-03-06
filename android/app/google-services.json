@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "638995538159",
+    "firebase_url": "https://consignes-interactives-default-rtdb.europe-west1.firebasedatabase.app",
     "project_id": "consignes-interactives",
     "storage_bucket": "consignes-interactives.firebasestorage.app"
   },

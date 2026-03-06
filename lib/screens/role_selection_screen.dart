@@ -1,33 +1,39 @@
 // lib/screens/role_selection_screen.dart
-import 'package:flutter/material.dart'; // Fournit debugPrint et Key
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'
-    as fs; // Alias pour cohérence
 
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' as fs;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../main.dart'; // Pour accéder à la constante DEPLOYMENT_ID
 import 'home_screen.dart';
 import 'login_chantier_screen.dart';
+import 'chantier_plus_screen.dart'; // <-- 1. IMPORTER LE NOUVEL ÉCRAN
+
+// ... (Le début du fichier reste identique)
+Future<void> _saveDeploymentId() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('deployment_id', DEPLOYMENT_ID);
+  } catch (e) {
+    debugPrint("Erreur lors de la sauvegarde de l'ID de déploiement : $e");
+  }
+}
 
 class RoleSelectionScreen extends StatefulWidget {
-  const RoleSelectionScreen(
-      {super.key}); // super.key est déjà utilisé, c'est bien
+  const RoleSelectionScreen({super.key});
 
-  static Future<void> triggerRoleReSelection(
+  static Future<bool?> triggerRoleReSelection(
       BuildContext externalContext) async {
     try {
       await FirebaseAuth.instance.signOut();
     } catch (e, s) {
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] triggerRoleReSelection: ERREUR pendant la déconnexion: $e\nStackTrace: $s");
+      debugPrint("Erreur pendant la déconnexion: $e\n$s");
     }
 
-    if (!externalContext.mounted) {
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] triggerRoleReSelection: Contexte externe non monté. Navigation annulée.");
-      return;
-    }
-    Navigator.pushAndRemoveUntil(
+    if (!externalContext.mounted) return null;
+
+    return await Navigator.pushAndRemoveUntil<bool?>(
       externalContext,
       MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
       (Route<dynamic> route) => false,
@@ -35,420 +41,113 @@ class RoleSelectionScreen extends StatefulWidget {
   }
 
   @override
-  // Modifié pour retourner le type d'état public
   RoleSelectionScreenState createState() => RoleSelectionScreenState();
 }
 
-// Classe d'état renommée en RoleSelectionScreenState (publique)
 class RoleSelectionScreenState extends State<RoleSelectionScreen> {
   bool _isLoading = true;
   bool _isProcessingLogin = false;
 
-  final List<String> _postesDeTravail = [
-    "Poste du matin",
-    "Poste d'après-midi",
-    "Poste de nuit",
-    "HN",
-  ];
-
-  final List<int> _numerosEquipe = [1, 2, 3, 4];
-
   @override
   void initState() {
     super.initState();
-    _checkUserAndNavigateBasedOnFirestoreRoles();
+    _checkUserAndNavigate();
   }
 
-  Future<List<String>> _getUserRolesFromFirestore(String uid) async {
-    try {
-      fs.DocumentSnapshot userDoc = await fs.FirebaseFirestore.instance
-          .collection('utilisateurs')
-          .doc(uid)
-          .get();
-
-      if (userDoc.exists && userDoc.data() != null) {
-        var data = userDoc.data() as Map<String, dynamic>;
-        if (data.containsKey('roles') && data['roles'] is List) {
-          List<String> roles =
-              List<String>.from(data['roles'].map((role) => role.toString()));
-          return roles;
-        }
-      }
-    } catch (e, s) {
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] _getUserRolesFromFirestore: ERREUR lors de la récupération des rôles pour $uid: $e\nStackTrace: $s");
-    }
-    // Remplacé print par debugPrint
-    debugPrint(
-        "[RoleSelectionScreen] _getUserRolesFromFirestore: Retour d'une liste de rôles vide pour UID: $uid (suite à une erreur ou données manquantes).");
-    return [];
-  }
-
-  Future<void> _checkUserAndNavigateBasedOnFirestoreRoles() async {
-    if (!mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-      return;
-    }
-    setState(() {
-      _isLoading = true;
-    });
-
+  Future<void> _checkUserAndNavigate() async {
+    setState(() => _isLoading = true);
     User? currentUser = FirebaseAuth.instance.currentUser;
 
     if (currentUser != null) {
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: Utilisateur Firebase connecté. UID: ${currentUser.uid}");
-      List<String> roles = await _getUserRolesFromFirestore(currentUser.uid);
-
+      final userDoc = await fs.FirebaseFirestore.instance
+          .collection('utilisateurs')
+          .doc(currentUser.uid)
+          .get();
       if (!mounted) return;
+      final data = userDoc.data();
+      final roles = data != null ? data['roles'] as List<dynamic>? : null;
 
-      bool dataValidePourChefEquipe = true;
-      if (roles.contains('chef_equipe')) {
-        fs.DocumentSnapshot userDocData = await fs.FirebaseFirestore.instance
+      if (userDoc.exists && roles != null && roles.isNotEmpty) {
+        Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => HomeScreen(
+                userId: currentUser.uid,
+                initialTranche: userDoc.data()?['favoriteTranche'],
+              ),
+            ),
+            (Route<dynamic> route) => false);
+        return;
+      } else {
+        await FirebaseAuth.instance.signOut();
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _startLoginProcess() async {
+    if (_isProcessingLogin) return;
+    setState(() => _isProcessingLogin = true);
+
+    try {
+      bool? loginSuccess = await Navigator.push<bool?>(
+        context,
+        MaterialPageRoute(
+            builder: (_) => LoginChantierScreen(onSuccess: () {})),
+      );
+
+      if (loginSuccess == true) {
+        await _saveDeploymentId();
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser == null) {
+          if (mounted) setState(() => _isProcessingLogin = false);
+          return;
+        }
+
+        final userDoc = await fs.FirebaseFirestore.instance
             .collection('utilisateurs')
             .doc(currentUser.uid)
             .get();
         if (!mounted) return;
 
-        if (userDocData.exists && userDocData.data() != null) {
-          var data = userDocData.data() as Map<String, dynamic>;
-          if (!data.containsKey('numeroEquipe') ||
-              data['numeroEquipe'] == null ||
-              !data.containsKey('poste_actuel') ||
-              data['poste_actuel'] == null) {
-            dataValidePourChefEquipe = false;
-          }
-        } else {
-          dataValidePourChefEquipe = false;
-        }
-      }
+        final data = userDoc.data();
+        final favoriteTranche =
+            (userDoc.exists && data != null) ? data['favoriteTranche'] : null;
 
-      if (roles.isNotEmpty && dataValidePourChefEquipe) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          MaterialPageRoute(
+            builder: (_) => HomeScreen(
+              userId: currentUser.uid,
+              initialTranche: favoriteTranche,
+            ),
+          ),
           (Route<dynamic> route) => false,
         );
-        return;
       } else {
-        String causeAffichageOptions = roles.isEmpty
-            ? "rôles Firestore vides"
-            : "données chef d'équipe (numeroEquipe/poste_actuel) invalides";
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: Utilisateur Firebase connecté (UID: ${currentUser.uid}) mais $causeAffichageOptions. Affichage options.");
-      }
-    } else {
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: Pas d'utilisateur Firebase connecté. Affichage options.");
-    }
-
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-    // Remplacé print par debugPrint
-    debugPrint(
-        "[RoleSelectionScreen] _checkUserAndNavigateBasedOnFirestoreRoles: FIN - Affichage des options. _isLoading: $_isLoading");
-  }
-
-  Future<String?> _showPosteSelectionDialog() async {
-    if (!mounted) return null;
-    return await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: const Text('Choisir un poste'),
-          content: SingleChildScrollView(
-            child: ListBody(
-              children: _postesDeTravail.map((poste) {
-                return ListTile(
-                  title: Text(poste),
-                  onTap: () {
-                    Navigator.of(dialogContext).pop(poste);
-                  },
-                );
-              }).toList(),
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('ANNULER'),
-              onPressed: () {
-                Navigator.of(dialogContext).pop(null);
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<int?> _showEquipeSelectionDialog() async {
-    if (!mounted) {
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] _showEquipeSelectionDialog: Non monté, retour null.");
-      return null;
-    }
-    // Remplacé print par debugPrint
-    debugPrint(
-        "[RoleSelectionScreen] _showEquipeSelectionDialog: Début fonction, affichage dialogue.");
-
-    return await showDialog<int>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _showEquipeSelectionDialog: Builder du dialogue appelé.");
-        return AlertDialog(
-          title: const Text('Choisir une Équipe'),
-          content: SingleChildScrollView(
-            child: ListBody(
-              children: _numerosEquipe.map((numero) {
-                return ListTile(
-                  title: Text('Équipe $numero'),
-                  onTap: () {
-                    // Remplacé print par debugPrint
-                    debugPrint(
-                        "[RoleSelectionScreen] _showEquipeSelectionDialog: Équipe $numero choisie.");
-                    Navigator.of(dialogContext).pop(numero);
-                  },
-                );
-              }).toList(),
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('ANNULER'),
-              onPressed: () {
-                // Remplacé print par debugPrint
-                debugPrint(
-                    "[RoleSelectionScreen] _showEquipeSelectionDialog: Annuler cliqué.");
-                Navigator.of(dialogContext).pop(null);
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _handleLoginAttemptForRoleType(String roleType) async {
-    if (_isProcessingLogin) return;
-    // Remplacé print par debugPrint
-    debugPrint(
-        "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Tentative de connexion pour type: $roleType");
-    if (!mounted) return;
-
-    setState(() {
-      _isProcessingLogin = true;
-    });
-
-    String? selectedPoste;
-    int? selectedTeamNumber;
-
-    try {
-      User? user;
-
-      if (roleType == "chef_equipe") {
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: AVANT APPEL _showPosteSelectionDialog");
-        selectedPoste = await _showPosteSelectionDialog();
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: APRES APPEL _showPosteSelectionDialog. selectedPoste: $selectedPoste");
-
-        if (selectedPoste == null) {
-          // Remplacé print par debugPrint
-          debugPrint(
-              "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Poste annulé.");
-          if (mounted) {
-            setState(() {
-              _isProcessingLogin = false;
-            });
-          }
-          return;
+        if (mounted) {
+          setState(() => _isProcessingLogin = false);
         }
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Poste sélectionné pour chef d'équipe: $selectedPoste");
-
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: AVANT APPEL _showEquipeSelectionDialog...");
-        selectedTeamNumber = await _showEquipeSelectionDialog();
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: APRES APPEL _showEquipeSelectionDialog. selectedTeamNumber: $selectedTeamNumber");
-
-        if (selectedTeamNumber == null) {
-          // Remplacé print par debugPrint
-          debugPrint(
-              "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Équipe annulée.");
-          if (mounted) {
-            setState(() {
-              _isProcessingLogin = false;
-            });
-          }
-          return;
-        }
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Numéro d'équipe sélectionné: $selectedTeamNumber");
-
-        User? currentAuthUser = FirebaseAuth.instance.currentUser;
-        if (currentAuthUser != null && !currentAuthUser.isAnonymous) {
-          await FirebaseAuth.instance.signOut();
-          currentAuthUser = null;
-        }
-
-        if (currentAuthUser == null || !currentAuthUser.isAnonymous) {
-          user = (await FirebaseAuth.instance.signInAnonymously()).user;
-        } else {
-          user = currentAuthUser;
-        }
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Connexion anonyme réussie/utilisée. UID: ${user?.uid}");
-
-        if (user != null) {
-          fs.DocumentReference userDocRef = fs.FirebaseFirestore.instance
-              .collection('utilisateurs')
-              .doc(user.uid);
-          String nomCompletEquipePoste =
-              "Équipe $selectedTeamNumber - $selectedPoste";
-          Map<String, dynamic> userDataToSet = {
-            'uid': user.uid,
-            'email': null,
-            'nom': nomCompletEquipePoste,
-            'prenom': '',
-            'createdAt': fs.FieldValue.serverTimestamp(),
-            'roles': ['chef_equipe'],
-            'poste_actuel': selectedPoste,
-            'numeroEquipe': selectedTeamNumber,
-            'derniere_selection_poste_equipe': fs.FieldValue.serverTimestamp(),
-          };
-          await userDocRef.set(userDataToSet, fs.SetOptions(merge: true));
-          // Remplacé print par debugPrint
-          debugPrint(
-              "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Document pour chef d'équipe ($nomCompletEquipePoste) traité. UID: ${user.uid}. Navigation.");
-          if (mounted) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
-              (Route<dynamic> route) => false,
-            );
-          }
-          return;
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Erreur de connexion anonyme.")));
-            setState(() {
-              _isProcessingLogin = false;
-            });
-          }
-          return;
-        }
-      } else if (roleType == "chef_de_chantier" ||
-          roleType == "administrateur") {
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Navigation vers LoginChantierScreen pour $roleType...");
-        bool? loginSuccess = await Navigator.push<bool?>(
-          context,
-          MaterialPageRoute(
-              builder: (_) => LoginChantierScreen(onSuccess: () {})),
-        );
-        // Remplacé print par debugPrint
-        debugPrint(
-            "[RoleSelectionScreen] _handleLoginAttemptForRoleType: Retour de LoginChantierScreen. loginSuccess: $loginSuccess pour $roleType.");
-        if (loginSuccess == true) {
-          if (mounted) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
-              (Route<dynamic> route) => false,
-            );
-          }
-          return;
-        } else {
-          if (mounted) {
-            setState(() {
-              _isProcessingLogin = false;
-            });
-          }
-          return;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _isProcessingLogin = false;
-        });
       }
     } catch (e, s) {
-      // Ajout de la StackTrace s
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] ERREUR pendant _handleLoginAttemptForRoleType($roleType): $e\nStackTrace: $s");
+      debugPrint("ERREUR pendant _startLoginProcess: $e\n$s");
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("Erreur: ${e.toString()}")));
-        setState(() {
-          _isProcessingLogin = false;
-        });
+        setState(() => _isProcessingLogin = false);
       }
     }
   }
 
-  Widget _buildRoleButton(BuildContext context,
-      {required String text,
-      required Color color,
-      Color textColor = Colors.white,
-      required String roleKey}) {
-    final double buttonWidth = MediaQuery.of(context).size.width * 0.40;
-    const double buttonHeight = 35.0;
-
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: textColor,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        elevation: 3,
-        fixedSize: Size(buttonWidth, buttonHeight),
-      ),
-      onPressed: _isProcessingLogin
-          ? null
-          : () {
-              _handleLoginAttemptForRoleType(roleKey);
-            },
-      child: Text(text),
-    );
-  }
+  // --- 2. LA FONCTION POUR LE BOUTON CHANTIER+ N'EST PLUS NÉCESSAIRE ---
+  // On la supprime car la navigation se fait directement dans le `onTap`.
 
   @override
   Widget build(BuildContext context) {
-    // Remplacé print par debugPrint
-    debugPrint(
-        "[RoleSelectionScreen] build: APPELÉ. _isLoading=$_isLoading, _isProcessingLogin=$_isProcessingLogin");
-
     if (_isLoading) {
-      // Remplacé print par debugPrint
-      debugPrint(
-          "[RoleSelectionScreen] build: Affichage du CircularProgressIndicator initial (_isLoading=true).");
       return const Scaffold(
         backgroundColor: Color(0xFFD6F5D6),
         body: Center(child: CircularProgressIndicator(color: Colors.green)),
@@ -456,8 +155,6 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
     }
 
     const Color backgroundColor = Color(0xFFD6F5D6);
-    const Color buttonChefColor = Color(0xFF90C22E);
-    const Color buttonAdminColor = Color(0xFFE53935);
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -466,75 +163,103 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
           fit: StackFit.expand,
           children: <Widget>[
             Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 30.0, vertical: 20.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    Image.asset(
-                      'assets/images/oms-logo.png',
-                      height: 200,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Text(
-                          'OMS Énergie',
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Image.asset(
+                    'assets/images/oms-logo.png',
+                    height: 200,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Text('OMS Énergie',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               fontSize: 36,
                               fontWeight: FontWeight.bold,
-                              color: Colors.black87),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 50),
-                    if (_isProcessingLogin)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 20.0),
-                        child: Column(
-                          children: [
-                            CircularProgressIndicator(color: Colors.green),
-                            SizedBox(height: 20),
-                            Text("Traitement en cours...",
-                                style: TextStyle(
-                                    fontSize: 16, color: Colors.black54)),
-                          ],
+                              color: Colors.black87));
+                    },
+                  ),
+                  const SizedBox(height: 60),
+                  if (_isProcessingLogin)
+                    const CircularProgressIndicator(color: Colors.green)
+                  else
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // --- 3. MISE À JOUR DU LOGO DE GAUCHE (Chantier+) ---
+                        // --- MISE À JOUR DU LOGO DE GAUCHE (Chantier+) DANS BUILD ---
+                        GestureDetector(
+                          onTap: () async {
+                            // 1. On lance l'écran de connexion d'abord
+                            bool? loginSuccess = await Navigator.push<bool?>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    LoginChantierScreen(onSuccess: () {}),
+                              ),
+                            );
+
+                            // 2. Si la connexion est réussie, on va vers ChantierPlus
+                            if (loginSuccess == true) {
+                              if (!mounted) return;
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const ChantierPlusScreen(),
+                                ),
+                              );
+                            }
+                          },
+                          child: Tooltip(
+                            message: 'Authentification requise pour Chantier+',
+                            child: Image.asset(
+                              'assets/images/chantier+.png',
+                              height: 100,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Icon(
+                                  Icons.add_business_outlined,
+                                  size: 100,
+                                  color: Colors.blueGrey,
+                                );
+                              },
+                            ),
+                          ),
                         ),
-                      )
-                    else
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildRoleButton(context,
-                              text: 'Chef d\'équipe',
-                              color: buttonChefColor,
-                              roleKey: 'chef_equipe'),
-                          const SizedBox(height: 15),
-                          _buildRoleButton(context,
-                              text: 'Chef de chantier',
-                              color: buttonChefColor,
-                              roleKey: 'chef_de_chantier'),
-                          const SizedBox(height: 15),
-                          _buildRoleButton(context,
-                              text: 'Administrateur',
-                              color: buttonAdminColor,
-                              roleKey: 'administrateur'),
-                        ],
-                      ),
-                  ],
-                ),
+
+                        const SizedBox(width: 40),
+
+                        // --- Le logo de droite reste le bouton de connexion ---
+                        GestureDetector(
+                          onTap: _startLoginProcess, // Déclenche la connexion
+                          child: Tooltip(
+                            message: 'Accéder à l\'application',
+                            child: Image.asset(
+                              'assets/images/icon1.png',
+                              height: 100,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Icon(
+                                  Icons.login,
+                                  size: 100,
+                                  color: Colors.blueGrey,
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
               ),
             ),
             Positioned(
               left: 12.0,
               bottom: 12.0,
               child: Text(
-                "V.BETA 2.0",
-                // Vous pouvez envisager de rendre cela dynamique avec package_info_plus
+                "V.${DEPLOYMENT_ID.replaceAll('v', '')}",
                 style: TextStyle(
-                  color: Colors.grey.shade700,
-                  fontSize: 12.0,
-                  fontWeight: FontWeight.normal,
-                ),
+                    color: Colors.grey.shade700,
+                    fontSize: 12.0,
+                    fontWeight: FontWeight.normal),
               ),
             ),
           ],

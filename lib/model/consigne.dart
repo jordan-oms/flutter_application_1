@@ -1,5 +1,7 @@
-// model/consigne.dart
-import 'package:cloud_firestore/cloud_firestore.dart' as fs; // Utilisation de l'alias fs
+// lib/model/consigne.dart
+
+import 'package:cloud_firestore/cloud_firestore.dart'
+    as fs; // Utilisation de l'alias fs
 import 'package:flutter/foundation.dart';
 import '/model/commentaire.dart'; // Assurez-vous que le chemin est correct
 
@@ -21,6 +23,9 @@ class Consigne {
   final List<Commentaire>? commentairesNonRealisation;
   final bool estNonRealiseeEffectivement;
 
+  // 1. AJOUT DU NOUVEAU CHAMP
+  final String? dosimetrieInfo;
+
   Consigne({
     required this.id,
     required this.tranche,
@@ -38,6 +43,9 @@ class Consigne {
     this.idAuteurValidation,
     this.commentairesNonRealisation,
     this.estNonRealiseeEffectivement = false,
+
+    // 2. AJOUT DU CHAMP AU CONSTRUCTEUR
+    this.dosimetrieInfo,
   });
 
   factory Consigne.fromJson(Map<String, dynamic> json) {
@@ -48,13 +56,12 @@ class Consigne {
           .map((data) => Commentaire.fromJson(data as Map<String, dynamic>))
           .toList();
     } else if (rawCommentairesNonRealisation is Map) {
-      // Gérer l'ancien format si nécessaire
       try {
         parsedCommentairesNonRealisation = [
           Commentaire.fromJson(
               rawCommentairesNonRealisation as Map<String, dynamic>)
         ];
-      } catch (e, s) { // Capture de l'exception et de la StackTrace
+      } catch (e, s) {
         debugPrint(
             "Erreur de désérialisation de l'ancien format de commentaireNonRealisation: $e\nStackTrace: $s");
       }
@@ -65,7 +72,6 @@ class Consigne {
       tranche: json['tranche'] as String,
       contenu: json['contenu'] as String,
       dateEmission: (json['dateEmission'] as fs.Timestamp).toDate(),
-      // Utilisation de fs.Timestamp
       estPrioritaire: json['estPrioritaire'] as bool? ?? false,
       auteurIdCreation: json['auteurIdCreation'] as String,
       auteurNomPrenomCreation: json['auteurNomPrenomCreation'] as String,
@@ -74,12 +80,14 @@ class Consigne {
       enjeu: json['enjeu'] as String?,
       estValidee: json['estValidee'] as bool? ?? false,
       dateValidation: (json['dateValidation'] as fs.Timestamp?)?.toDate(),
-      // Utilisation de fs.Timestamp?
       commentaireValidation: json['commentaireValidation'] as String?,
       idAuteurValidation: json['idAuteurValidation'] as String?,
       commentairesNonRealisation: parsedCommentairesNonRealisation,
       estNonRealiseeEffectivement:
-      json['estNonRealiseeEffectivement'] as bool? ?? false,
+          json['estNonRealiseeEffectivement'] as bool? ?? false,
+
+      // 3. AJOUT DE LA LECTURE DEPUIS JSON
+      dosimetrieInfo: json['dosimetrieInfo'] as String?,
     );
   }
 
@@ -89,7 +97,6 @@ class Consigne {
       'tranche': tranche,
       'contenu': contenu,
       'dateEmission': fs.Timestamp.fromDate(dateEmission),
-      // Utilisation de fs.Timestamp
       'estPrioritaire': estPrioritaire,
       'auteurIdCreation': auteurIdCreation,
       'auteurNomPrenomCreation': auteurNomPrenomCreation,
@@ -98,8 +105,7 @@ class Consigne {
       'enjeu': enjeu,
       'estValidee': estValidee,
       'dateValidation': dateValidation != null
-          ? fs.Timestamp.fromDate(
-          dateValidation!) // Utilisation de fs.Timestamp
+          ? fs.Timestamp.fromDate(dateValidation!)
           : null,
       'commentaireValidation': commentaireValidation,
       'idAuteurValidation': idAuteurValidation,
@@ -107,6 +113,9 @@ class Consigne {
           ?.map((commentaire) => commentaire.toJson())
           .toList(),
       'estNonRealiseeEffectivement': estNonRealiseeEffectivement,
+
+      // 4. AJOUT DE L'ÉCRITURE VERS JSON
+      'dosimetrieInfo': dosimetrieInfo,
     };
   }
 
@@ -127,6 +136,10 @@ class Consigne {
     String? idAuteurValidation,
     List<Commentaire>? commentairesNonRealisation,
     bool? estNonRealiseeEffectivement,
+
+    // 5. AJOUT DU CHAMP DOSIMETRIE DANS copyWith
+    String? dosimetrieInfo,
+    bool clearDosimetrieInfo = false,
     bool clearCommentaireValidation = false,
     bool clearDateValidation = false,
     bool clearIdAuteurValidation = false,
@@ -140,7 +153,7 @@ class Consigne {
       estPrioritaire: estPrioritaire ?? this.estPrioritaire,
       auteurIdCreation: auteurIdCreation ?? this.auteurIdCreation,
       auteurNomPrenomCreation:
-      auteurNomPrenomCreation ?? this.auteurNomPrenomCreation,
+          auteurNomPrenomCreation ?? this.auteurNomPrenomCreation,
       roleAuteurCreation: roleAuteurCreation ?? this.roleAuteurCreation,
       categorie: categorie ?? this.categorie,
       enjeu: (enjeu is Function) ? enjeu() : (enjeu ?? this.enjeu) as String?,
@@ -148,9 +161,9 @@ class Consigne {
       dateValidation: clearDateValidation
           ? null
           : (dateValidation ??
-          ((estValidee != null && !estValidee)
-              ? null
-              : this.dateValidation)),
+              ((estValidee != null && !estValidee)
+                  ? null
+                  : this.dateValidation)),
       commentaireValidation: clearCommentaireValidation
           ? null
           : commentaireValidation ?? this.commentaireValidation,
@@ -158,10 +171,14 @@ class Consigne {
           ? null
           : (idAuteurValidation ?? this.idAuteurValidation),
       commentairesNonRealisation: clearCommentairesNonRealisation
-          ? null
+          ? [] // On met une liste vide plutôt que null pour éviter les erreurs
           : commentairesNonRealisation ?? this.commentairesNonRealisation,
       estNonRealiseeEffectivement:
-      estNonRealiseeEffectivement ?? this.estNonRealiseeEffectivement,
+          estNonRealiseeEffectivement ?? this.estNonRealiseeEffectivement,
+
+      // AJOUT DE LA LOGIQUE DANS copyWith
+      dosimetrieInfo:
+          clearDosimetrieInfo ? null : dosimetrieInfo ?? this.dosimetrieInfo,
     );
   }
 }

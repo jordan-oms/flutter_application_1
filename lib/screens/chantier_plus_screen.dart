@@ -211,8 +211,9 @@ class _ChantierPlusScreenState extends State<ChantierPlusScreen> {
                       chantier: data['chantier'] ?? "N/A",
                       local: data['local'] ?? "N/A",
                       diametre: data['diametre'] ?? "N/A",
+                      metrecube: data['metrecube'] ?? "N/A",
+                      // 🔹 Nouveau
                       isRecent: isRecent,
-                      // Passages des données auteurs et dates
                       createdByUser: data['createdBy']?['nom'] ?? "Inconnu",
                       createdAtDate: data['createdBy']?['date'],
                       lastModByUser: data['lastUpdate']?['nom'] ?? "Inconnu",
@@ -251,6 +252,7 @@ class _ChantierPlusScreenState extends State<ChantierPlusScreen> {
     required String chantier,
     required String local,
     required String diametre,
+    required String metrecube,
     required bool isRecent,
     required String createdByUser,
     required dynamic createdAtDate,
@@ -326,10 +328,15 @@ class _ChantierPlusScreenState extends State<ChantierPlusScreen> {
                   const SizedBox(width: 4),
                   Text(diametre,
                       style: TextStyle(fontSize: 11, color: Colors.grey[700])),
+                  const SizedBox(width: 10),
+                  Icon(Icons.view_in_ar, size: 12, color: Colors.grey[600]),
+                  // Icône Cube
+                  const SizedBox(width: 4),
+                  Text(metrecube,
+                      style: TextStyle(fontSize: 11, color: Colors.grey[700])),
                 ],
               ),
               const Divider(height: 12, thickness: 0.5),
-              // 🔹 CRÉÉ PAR (Persistent)
               Text("👤 Créé par : $createdByUser",
                   style: TextStyle(
                       color: Colors.grey[600],
@@ -338,7 +345,6 @@ class _ChantierPlusScreenState extends State<ChantierPlusScreen> {
               Text("📅 le ${_formatDateTime(createdAtDate)}",
                   style: TextStyle(color: Colors.grey[500], fontSize: 9)),
               const SizedBox(height: 4),
-              // 🔹 DERNIÈRE MODIFICATION
               Text("✏️ Modifié par : $lastModByUser",
                   style: TextStyle(
                       color: oMSGreen.withOpacity(0.8),

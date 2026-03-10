@@ -15,9 +15,10 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
   final TextEditingController chantierController = TextEditingController();
   final TextEditingController localController = TextEditingController();
   final TextEditingController diametreController = TextEditingController();
+  final TextEditingController metrecubeController = TextEditingController();
 
   bool isLoading = false;
-  String type = "Pair"; // État qui sera piloté automatiquement
+  String type = "Pair"; // Piloté automatiquement par le listener
 
   final Color oMSGreen = const Color(0xFF8EBB21);
 
@@ -64,18 +65,13 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         materielControllers[item] = TextEditingController(text: "0");
       }
     });
-
-    // 🔹 Ecouter les changements de texte
     nomController.addListener(_autoDetectType);
   }
 
-  // 🔹 Détection automatique améliorée
   void _autoDetectType() {
     String text = nomController.text.trim();
     if (text.isNotEmpty) {
-      // On récupère le premier caractère (qui est obligatoirement un chiffre grâce au formatter)
       int? firstDigit = int.tryParse(text[0]);
-
       if (firstDigit != null) {
         String newType = (firstDigit % 2 == 0) ? "Pair" : "Impair";
         if (type != newType) {
@@ -94,6 +90,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
     chantierController.dispose();
     localController.dispose();
     diametreController.dispose();
+    metrecubeController.dispose();
     materielControllers.forEach((_, c) => c.dispose());
     super.dispose();
   }
@@ -157,6 +154,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         'chantier': chantierController.text.trim(),
         'local': localController.text.trim(),
         'diametre': "${diametreController.text.trim()} DM",
+        'metrecube': "${metrecubeController.text.trim()} M3",
         'materiels': materiels,
         'createdBy': {
           'userId': user.uid,
@@ -201,7 +199,8 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
             slivers: [
               SliverToBoxAdapter(
                 child: Container(
-                  padding: const EdgeInsets.all(15),
+                  padding: const EdgeInsets.fromLTRB(15, 15, 15, 25),
+                  // Padding ajusté
                   decoration: BoxDecoration(
                     color: oMSGreen,
                     borderRadius: const BorderRadius.only(
@@ -210,6 +209,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                   ),
                   child: Column(
                     children: [
+                      // --- LIGNE 1 : Repère + Chantier ---
                       Row(
                         children: [
                           Expanded(
@@ -219,13 +219,13 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                                   color: Colors.black, fontSize: 14),
                               inputFormatters: [
                                 LengthLimitingTextInputFormatter(9),
-                                RepereInputFormatter(),
+                                RepereInputFormatter()
                               ],
                               decoration: _inputStyle(
-                                  "REPÈRE FONCTIONNEL", "Ex: 1ABC123DE"),
+                                  "REPÈRE FONCTIONNEL", "1ABC123DE"),
                             ),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: TextField(
                               controller: chantierController,
@@ -238,9 +238,12 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
+
+                      // --- LIGNE 2 : Local + Diamètre + Mètre Cube ---
                       Row(
                         children: [
                           Expanded(
+                            flex: 2, // Un peu plus large pour le local
                             child: TextField(
                               controller: localController,
                               style: const TextStyle(
@@ -248,8 +251,9 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                               decoration: _inputStyle("LOCAL", "Position"),
                             ),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
                           Expanded(
+                            flex: 1,
                             child: TextField(
                               controller: diametreController,
                               keyboardType: TextInputType.number,
@@ -258,24 +262,35 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                               inputFormatters: [
                                 FilteringTextInputFormatter.digitsOnly
                               ],
-                              decoration:
-                                  _inputStyle("DIAMÈTRE", "Chiffres").copyWith(
+                              decoration: _inputStyle("DIA.", "Ø").copyWith(
                                 suffixText: "DM",
                                 suffixStyle: const TextStyle(
                                     color: Colors.black,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.bold),
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _typeChip("Pair"),
-                          const SizedBox(width: 20),
-                          _typeChip("Impair"),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 1,
+                            child: TextField(
+                              controller: metrecubeController,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(
+                                  color: Colors.black, fontSize: 14),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly
+                              ],
+                              decoration: _inputStyle("VOL.", "M3").copyWith(
+                                suffixText: "M3",
+                                suffixStyle: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -296,8 +311,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                                     letterSpacing: 1.2)),
                           );
                         }
-                        String item = entry.value[index - 1];
-                        return _buildMaterielTile(item);
+                        return _buildMaterielTile(entry.value[index - 1]);
                       },
                       childCount: entry.value.length + 1,
                     ),
@@ -331,29 +345,6 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _typeChip(String label) {
-    bool isSelected = (type == label);
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          color: isSelected ? Colors.white : Colors.black54,
-          fontWeight: FontWeight.bold,
-          decoration:
-              isSelected ? TextDecoration.none : TextDecoration.lineThrough,
-        ),
-      ),
-      selected: isSelected,
-      onSelected: (val) {},
-      // 🔹 Laisser vide mais présent pour forcer l'UI
-      selectedColor: const Color(0xFF6B8E19),
-      backgroundColor: Colors.grey.shade400,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      showCheckmark: false,
     );
   }
 
@@ -430,14 +421,12 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
   }
 }
 
-// 🔹 FORMATEUR STRICT
 class RepereInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
       TextEditingValue oldValue, TextEditingValue newValue) {
     final text = newValue.text.toUpperCase();
     if (text.isEmpty) return newValue;
-
     for (int i = 0; i < text.length; i++) {
       final char = text[i];
       if (i == 0) {

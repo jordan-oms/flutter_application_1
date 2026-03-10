@@ -29,7 +29,6 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
   late Animation<double> _fadeAnimation;
 
   final LocalAuthentication auth = LocalAuthentication();
-  bool _canCheckBiometrics = false;
 
   @override
   void initState() {
@@ -42,7 +41,6 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
         CurvedAnimation(parent: _animController, curve: Curves.easeIn);
     _animController.forward();
     _loadSavedEmail();
-    _checkBiometrics();
   }
 
   @override
@@ -71,38 +69,6 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
     } else {
       await prefs.remove("saved_email");
       await prefs.setBool("remember_me", false);
-    }
-  }
-
-  Future<void> _checkBiometrics() async {
-    try {
-      final canCheck = await auth.canCheckBiometrics;
-      setState(() => _canCheckBiometrics = canCheck);
-    } catch (e) {
-      setState(() => _canCheckBiometrics = false);
-    }
-  }
-
-// NOUVELLE VERSION CORRIGÉE
-  // VERSION CORRIGÉE
-  Future<void> _authenticateWithBiometrics() async {
-    try {
-      final isAuthenticated = await auth.authenticate(
-        localizedReason: 'Connectez-vous avec votre empreinte ou FaceID',
-        biometricOnly: true, // On garde uniquement ce paramètre
-      );
-      // ...
-
-      if (isAuthenticated) {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          if (mounted) Navigator.pop(context, true);
-        } else {
-          _showSnack("Veuillez d'abord vous connecter avec email/mot de passe");
-        }
-      }
-    } catch (e) {
-      _showSnack("Échec de l'authentification biométrique.");
     }
   }
 
@@ -301,20 +267,6 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
                                     padding: const EdgeInsets.all(15)),
                               ),
                             ),
-                      if (_canCheckBiometrics)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12.0),
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.fingerprint),
-                              label: const Text("Connexion biométrique"),
-                              onPressed: _authenticateWithBiometrics,
-                              style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.all(15)),
-                            ),
-                          ),
-                        ),
                       const SizedBox(height: 15),
                       // ...
                       const Divider(),

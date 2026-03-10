@@ -7,7 +7,8 @@ buildscript {
     }
     dependencies {
         classpath("com.android.tools.build:gradle:8.5.0")
-        classpath(kotlin("gradle-plugin", version = "1.8.22"))
+        // Dans buildscript -> dependencies
+        classpath(kotlin("gradle-plugin", version = "1.9.20")) // Remplacez 1.8.22 par 1.9.20
         classpath("com.google.gms:google-services:4.4.0") // Google Services pour Firebase
     }
 }

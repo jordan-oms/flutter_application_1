@@ -21,10 +21,13 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
 
   final Color oMSGreen = const Color(0xFF8EBB21);
 
+  // Contrôleurs pour les infos de l'en-tête
   final TextEditingController nomController = TextEditingController();
   final TextEditingController chantierController = TextEditingController();
   final TextEditingController localController = TextEditingController();
   final TextEditingController diametreController = TextEditingController();
+  final TextEditingController metrecubeController =
+      TextEditingController(); // 🔹 Nouveau
 
   Map<String, TextEditingController> materielControllers = {};
   Map<String, String> initialValues = {};
@@ -171,10 +174,13 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
 
       final data = doc.data() as Map<String, dynamic>;
 
+      // Remplissage des contrôleurs du header
       nomController.text = widget.repereId;
       chantierController.text = data['chantier'] ?? "";
       localController.text = data['local'] ?? "";
       diametreController.text = (data['diametre'] ?? "").replaceAll(" DM", "");
+      metrecubeController.text =
+          (data['metrecube'] ?? "").replaceAll(" M3", ""); // 🔹 Nouveau
 
       final mats = data['materiels'] as Map<String, dynamic>? ?? {};
       Map<String, TextEditingController> controllers = {};
@@ -232,12 +238,16 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
           "${userDoc.data()?['prenom'] ?? ""} ${userDoc.data()?['nom'] ?? ""}"
               .trim();
 
+      // 🔹 1. On définit docRef ici pour pouvoir l'utiliser deux fois
       final docRef =
           FirebaseFirestore.instance.collection('reperes').doc(widget.repereId);
+
+      // 🔹 2. On utilise docRef pour la mise à jour
       await docRef.update({
         'chantier': chantierController.text.trim(),
         'local': localController.text.trim(),
         'diametre': "${diametreController.text.trim()} DM",
+        'metrecube': "${metrecubeController.text.trim()} M3",
         'materiels': matsFinal,
         'lastUpdate': {
           'userId': user.uid,
@@ -246,6 +256,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
         }
       });
 
+      // 🔹 3. On utilise docRef pour ajouter l'historique
       await docRef.collection('modifications').add({
         'updatedBy': userName,
         'userId': user.uid,
@@ -256,6 +267,8 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
       setState(() => isEditing = false);
       _loadRepere();
       _markAsRead();
+    } catch (e) {
+      debugPrint("Erreur lors de la sauvegarde : $e");
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -333,11 +346,11 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed:
             isEditing ? _saveChanges : () => setState(() => isEditing = true),
-        backgroundColor: isEditing ? Colors.green : oMSGreen,
-        icon: Icon(isEditing ? Icons.save : Icons.edit, color: Colors.white),
+        backgroundColor: oMSGreen,
+        icon: Icon(isEditing ? Icons.save : Icons.edit, color: Colors.black),
         label: Text(isEditing ? "ENREGISTRER" : "MODIFIER",
             style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold)),
+                color: Colors.black, fontWeight: FontWeight.bold)),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
@@ -360,6 +373,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
         ),
         child: Column(
           children: [
+            // Ligne 1 : Repère + Chantier
             Row(
               children: [
                 Expanded(
@@ -372,25 +386,50 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            // Ligne 2 : Local + Diamètre + Mètre Cube (Dividé en 3)
             Row(
               children: [
                 Expanded(
+                    flex: 2,
                     child: _buildHeaderField(localController, "LOCAL",
                         enabled: isEditing)),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
+                  flex: 1,
                   child: TextField(
                     controller: diametreController,
                     enabled: isEditing,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(
                         color: Colors.black,
-                        fontSize: 13,
+                        fontSize: 12,
                         fontWeight: FontWeight.bold),
-                    decoration: _inputStyle("DIAMÈTRE").copyWith(
+                    decoration: _inputStyle("DIA.").copyWith(
                       suffixText: "DM",
                       suffixStyle: const TextStyle(
-                          color: Colors.black, fontWeight: FontWeight.bold),
+                          color: Colors.black,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 1,
+                  child: TextField(
+                    controller: metrecubeController,
+                    enabled: isEditing,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold),
+                    decoration: _inputStyle("VOL.").copyWith(
+                      suffixText: "M3",
+                      suffixStyle: const TextStyle(
+                          color: Colors.black,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -450,7 +489,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
       controller: controller,
       enabled: enabled,
       style: const TextStyle(
-          color: Colors.black, fontSize: 13, fontWeight: FontWeight.bold),
+          color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
       decoration: _inputStyle(label),
     );
   }
@@ -460,7 +499,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
       labelText: label,
       isDense: true,
       labelStyle: const TextStyle(
-          color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11),
+          color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10),
       filled: true,
       fillColor: Colors.white24,
       disabledBorder: OutlineInputBorder(
@@ -531,7 +570,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
               expand: false,
               builder: (context, scrollController) => Column(children: [
                 const SizedBox(height: 20),
-                const Text("Historique",
+                const Text("Historique des modifications",
                     style:
                         TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 Expanded(
@@ -607,6 +646,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
     chantierController.dispose();
     localController.dispose();
     diametreController.dispose();
+    metrecubeController.dispose(); // 🔹 Nouveau
     materielControllers.forEach((_, c) => c.dispose());
     super.dispose();
   }

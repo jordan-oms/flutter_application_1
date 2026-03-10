@@ -1292,7 +1292,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildConsignesList(List<Consigne> consignes) {
-    // ... (Cette fonction reste inchangée, elle utilise maintenant le RichText pour la validation)
     if (_selectedTranche == null) {
       return const Center(child: Text("Veuillez sélectionner une tranche."));
     }
@@ -1300,19 +1299,22 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Center(
           child: Text("Aucune consigne active pour cette tranche."));
     }
-    // On ajoute roleIntervenantString à la liste des rôles autorisés
+
     final bool peutAgirSurConsigne = (_userRoles.contains(roleAdminString) ||
             _userRoles.contains(roleChefDeChantierString) ||
             _userRoles.contains(roleChefEquipeString) ||
-            _userRoles.contains(roleIntervenantString)) && // <-- AJOUT ICI
+            _userRoles.contains(roleIntervenantString)) &&
         _currentUser != null;
+
     final bool peutModifierConsigne = (_userRoles.contains(roleAdminString) ||
             _userRoles.contains(roleChefDeChantierString)) &&
         _currentUser != null;
+
     final bool peutSupprimerConsigneNonValidee =
         (_userRoles.contains(roleAdminString) ||
                 _userRoles.contains(roleChefDeChantierString)) &&
             _currentUser != null;
+
     void _supprimerConsigne(Consigne c) {
       _obsNonRealiseeControllers.remove(c.id)?.dispose();
       _obsValidationControllers.remove(c.id)?.dispose();
@@ -1324,6 +1326,8 @@ class _HomeScreenState extends State<HomeScreen> {
       itemCount: consignes.length,
       itemBuilder: (context, index) {
         final c = consignes[index];
+
+        // Initialisation des contrôleurs
         if (!_obsNonRealiseeControllers.containsKey(c.id)) {
           _obsNonRealiseeControllers[c.id] = TextEditingController();
         }
@@ -1343,380 +1347,283 @@ class _HomeScreenState extends State<HomeScreen> {
             });
           }
         }
-        return Dismissible(
-          key: ValueKey(c.id),
-          direction: DismissDirection.endToStart,
-          onDismissed: (_) => _supprimerConsigne(c),
-          background: Container(
-            color: Colors.red,
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 20),
-            child: const Icon(Icons.delete, color: Colors.white, size: 30),
-          ),
-          child: Card(
-            key: ValueKey(c.id),
-            color: c.estPrioritaire && !c.estValidee
-                ? Colors.red.shade50
-                : (c.estValidee ? Colors.green.shade50 : Colors.grey.shade100),
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            elevation: c.estPrioritaire && !c.estValidee ? 4.0 : 2.0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              side: c.estPrioritaire && !c.estValidee
-                  ? BorderSide(color: Colors.red.shade200, width: 1.5)
-                  : BorderSide(color: Colors.grey.shade300),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 1. La Row contenant le checkbox, le texte ET les boutons
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // -- WIDGET CHECKBOX --
-                      if (peutAgirSurConsigne)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8.0, top: 6.0),
-                          child: SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: Checkbox(
-                              value: c.estValidee,
-                              onChanged: (val) {
-                                if (val != null) {
-                                  _presenterValidationConsigne(c, val);
-                                }
-                              },
-                              activeColor: Colors.green.shade600,
-                              checkColor: Colors.white,
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ),
-                        ),
-                      if (!peutAgirSurConsigne)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8.0, top: 10.0),
-                          child: Icon(
-                            c.estValidee
-                                ? Icons.check_circle
-                                : Icons.radio_button_unchecked,
-                            color: c.estValidee
-                                ? Colors.green.shade600
-                                : Colors.grey.shade400,
-                            size: 24,
-                          ),
-                        ),
 
-                      // -- WIDGET EXPANDED POUR LE TEXTE --
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              c.contenu,
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: c.estPrioritaire && !c.estValidee
-                                    ? FontWeight.bold
-                                    : FontWeight.w600,
-                                color: c.estPrioritaire && !c.estValidee
-                                    ? Colors.red.shade800
-                                    : (c.estValidee
-                                        ? Colors.grey.shade700
-                                        : Colors.black87),
-                                decoration: c.estValidee
-                                    ? TextDecoration.lineThrough
-                                    : null,
-                                decorationColor: Colors.grey.shade700,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "Créée par: ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${_formatDateSimple(c.dateEmission, showTime: false)}",
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontStyle: FontStyle.italic,
-                                  color: Colors.grey.shade600),
-                            ),
-                            if (c.categorie != null && c.categorie!.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4.0),
-                                child: Text("Catégorie: ${c.categorie}",
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.blueGrey.shade700)),
-                              ),
-                            if (c.enjeu != null && c.enjeu!.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4.0),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.shield_outlined,
-                                        color: Colors.blue.shade700, size: 14),
-                                    const SizedBox(width: 4),
-                                    Text("Enjeu: ${c.enjeu}",
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.blue.shade800,
-                                            fontWeight: FontWeight.w500)),
-                                  ],
-                                ),
-                              ),
-                          ],
+        // 🔹 RETRAIT DU DISMISSIBLE : On retourne directement la Card
+        return Card(
+          key: ValueKey(c.id),
+          color: c.estPrioritaire && !c.estValidee
+              ? Colors.red.shade50
+              : (c.estValidee ? Colors.green.shade50 : Colors.grey.shade100),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          elevation: c.estPrioritaire && !c.estValidee ? 4.0 : 2.0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8.0),
+            side: c.estPrioritaire && !c.estValidee
+                ? BorderSide(color: Colors.red.shade200, width: 1.5)
+                : BorderSide(color: Colors.grey.shade300),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // -- WIDGET CHECKBOX --
+                    if (peutAgirSurConsigne)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8.0, top: 6.0),
+                        child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: Checkbox(
+                            value: c.estValidee,
+                            onChanged: (val) {
+                              if (val != null) {
+                                _presenterValidationConsigne(c, val);
+                              }
+                            },
+                            activeColor: Colors.green.shade600,
+                            checkColor: Colors.white,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      ),
+                    if (!peutAgirSurConsigne)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8.0, top: 10.0),
+                        child: Icon(
+                          c.estValidee
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: c.estValidee
+                              ? Colors.green.shade600
+                              : Colors.grey.shade400,
+                          size: 24,
                         ),
                       ),
 
-                      // -- SIZEDBOX POUR LA COLONNE DES BOUTONS --
-                      SizedBox(
-                        width: 44,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.start,
-                          children: [
-                            // --- BOUTON MODIFIER ---
-                            if (peutModifierConsigne && !c.estValidee)
-                              IconButton(
-                                icon: Icon(Icons.edit_outlined,
-                                    color: Colors.blue.shade700, size: 22),
-                                tooltip: "Modifier la consigne",
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () =>
-                                    _presenterModificationConsigne(c),
-                              ),
-                            if (peutAgirSurConsigne && !c.estValidee)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 12.0),
-                                child: IconButton(
-                                  icon: Icon(Icons.gps_fixed,
-                                      color: Colors.blueGrey.shade700,
-                                      size: 22),
-                                  tooltip: "Voir dans Chantier+",
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (context) =>
-                                              const ChantierPlusScreen()),
-                                    );
-                                  },
-                                ),
-                              ),
-
-                            // --- BOUTON SUPPRIMER ---
-                            if (peutSupprimerConsigneNonValidee &&
-                                !c.estValidee)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 12.0),
-                                child: IconButton(
-                                  icon: Icon(Icons.delete_outline,
-                                      color: Colors.red.shade700, size: 22),
-                                  tooltip: "Supprimer la consigne",
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () async {
-                                    final confirmer = await showDialog<bool>(
-                                      context: context,
-                                      builder: (ctx) => AlertDialog(
-                                        title: const Text("Confirmation"),
-                                        content: Text(
-                                            "Supprimer la consigne '${c.contenu}' ?"),
-                                        actions: [
-                                          TextButton(
-                                              onPressed: () =>
-                                                  Navigator.of(ctx).pop(false),
-                                              child: const Text("Annuler")),
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.of(ctx).pop(true),
-                                            child: const Text("Supprimer",
-                                                style: TextStyle(
-                                                    color: Colors.red)),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                    if (confirmer == true) {
-                                      _supprimerConsigne(c);
-                                    }
-                                  },
-                                ),
-                              ),
-                          ],
-                        ),
-                      ), // <--- LA VIRGULE EST ICI !
-                    ],
-                  ),
-
-                  // 2. Le reste des widgets (champs d'observations, etc.) sont ici, APRES la Row
-                  const SizedBox(height: 12),
-                  if (!c.estValidee && peutAgirSurConsigne)
-                    _buildChampObservation(
-                      context: context,
-                      consigne: c,
-                      controller: _obsNonRealiseeControllers[c.id]!,
-                      label: "Observation (si non réalisée / en attente) :",
-                      hint:
-                          "Raison de la non-réalisation, action corrective...",
-                      onSave: (texteNouvelleObservation) {
-                        _enregistrerObservationNonRealisation(
-                            c, texteNouvelleObservation);
-                      },
-                      backgroundColor: Colors.orange.shade50,
-                      iconColor: Colors.orange.shade800,
-                    ),
-                  if (c.commentairesNonRealisation != null &&
-                      c.commentairesNonRealisation!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                          top: 10.0, left: 4.0, right: 4.0),
+                    // -- TEXTE --
+                    Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                              "Historique des observations (non réalisée/en attente):",
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.orange.shade900)),
-                          const SizedBox(height: 6),
-                          ...c.commentairesNonRealisation!.map((commentaire) {
-                            return Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 8),
-                                margin: const EdgeInsets.only(bottom: 6),
-                                decoration: BoxDecoration(
-                                    color: Colors.orange.shade100,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                        color: Colors.orange.shade200)),
-                                child: RichText(
-                                    text: TextSpan(
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.orange.shade900),
-                                        children: [
-                                      TextSpan(text: "${commentaire.texte}\n"),
-                                      TextSpan(
-                                          text:
-                                              "- ${commentaire.auteurNomPrenom} (${commentaire.roleAuteur}) le ${_formatDateSimple(commentaire.date, showTime: true)}",
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              fontStyle: FontStyle.italic,
-                                              color: Colors.orange.shade700))
-                                    ])));
-                          })
-                        ],
-                      ),
-                    ),
-                  if (c.estValidee && peutAgirSurConsigne)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10.0),
-                      child: _buildChampObservation(
-                        context: context,
-                        consigne: c,
-                        controller: _obsValidationControllers[c.id]!,
-                        label: "Observation (après validation) :",
-                        hint: "Détails supplémentaires, remarques...",
-                        onSave: (texteObservation) {
-                          _enregistrerObservationValidation(
-                              c, texteObservation);
-                        },
-                        backgroundColor: Colors.green.shade50,
-                        iconColor: Colors.green.shade800,
-                      ),
-                    ),
-
-                  // Affichage du commentaire de validation (si existant)
-                  if (c.commentaireValidation != null &&
-                      c.commentaireValidation!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                          top: 10.0, left: 4.0, right: 4.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("Observation de validation :",
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green.shade900)),
-                          const SizedBox(height: 6),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                                color: Colors.green.shade100,
-                                borderRadius: BorderRadius.circular(6),
-                                border:
-                                    Border.all(color: Colors.green.shade200)),
-                            child: RichText(
-                              text: TextSpan(
-                                text: c.commentaireValidation!,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.green.shade900,
-                                  fontFamily: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.fontFamily,
-                                ),
-                              ),
+                            c.contenu,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: c.estPrioritaire && !c.estValidee
+                                  ? FontWeight.bold
+                                  : FontWeight.w600,
+                              color: c.estPrioritaire && !c.estValidee
+                                  ? Colors.red.shade800
+                                  : (c.estValidee
+                                      ? Colors.grey.shade700
+                                      : Colors.black87),
+                              decoration: c.estValidee
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              decorationColor: Colors.grey.shade700,
                             ),
                           ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "Créée par: ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${_formatDateSimple(c.dateEmission, showTime: false)}",
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                                color: Colors.grey.shade600),
+                          ),
+                          if (c.categorie != null && c.categorie!.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Text("Catégorie: ${c.categorie}",
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.blueGrey.shade700)),
+                            ),
+                          if (c.enjeu != null && c.enjeu!.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.shield_outlined,
+                                      color: Colors.blue.shade700, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text("Enjeu: ${c.enjeu}",
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue.shade800,
+                                          fontWeight: FontWeight.w500)),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
 
-                  // Affichage de la dosimétrie (si existante)
-                  if (c.dosimetrieInfo != null && c.dosimetrieInfo!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                          top: 10.0, left: 4.0, right: 4.0),
+                    // -- BOUTONS DROITE --
+                    SizedBox(
+                      width: 44,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.start,
                         children: [
-                          Text("Dosimétrie :",
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.blue.shade900)),
-                          const SizedBox(height: 6),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(6),
-                                border:
-                                    Border.all(color: Colors.blue.shade200)),
-                            child: RichText(
-                              text: TextSpan(
-                                text: c.dosimetrieInfo!,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.blue.shade900,
-                                  fontFamily: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.fontFamily,
-                                ),
+                          if (peutModifierConsigne && !c.estValidee)
+                            IconButton(
+                              icon: Icon(Icons.edit_outlined,
+                                  color: Colors.blue.shade700, size: 22),
+                              tooltip: "Modifier la consigne",
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () =>
+                                  _presenterModificationConsigne(c),
+                            ),
+                          if (peutAgirSurConsigne && !c.estValidee)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12.0),
+                              child: IconButton(
+                                icon: Icon(Icons.gps_fixed,
+                                    color: Colors.blueGrey.shade700, size: 22),
+                                tooltip: "Voir dans Chantier+",
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (context) =>
+                                            const ChantierPlusScreen()),
+                                  );
+                                },
                               ),
                             ),
-                          ),
+                          if (peutSupprimerConsigneNonValidee && !c.estValidee)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12.0),
+                              child: IconButton(
+                                icon: Icon(Icons.delete_outline,
+                                    color: Colors.red.shade700, size: 22),
+                                tooltip: "Supprimer la consigne",
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () =>
+                                    _confirmerSuppressionConsigne(c),
+                              ),
+                            ),
                         ],
                       ),
                     ),
-                ],
-              ),
+                  ],
+                ),
+
+                // 🔹 Widgets d'observations
+                const SizedBox(height: 12),
+                if (!c.estValidee && peutAgirSurConsigne)
+                  _buildChampObservation(
+                    context: context,
+                    consigne: c,
+                    controller: _obsNonRealiseeControllers[c.id]!,
+                    label: "Observation (si non réalisée / en attente) :",
+                    hint: "Raison de la non-réalisation, action corrective...",
+                    onSave: (texteNouvelleObservation) {
+                      _enregistrerObservationNonRealisation(
+                          c, texteNouvelleObservation);
+                    },
+                    backgroundColor: Colors.orange.shade50,
+                    iconColor: Colors.orange.shade800,
+                  ),
+
+                if (c.commentairesNonRealisation != null &&
+                    c.commentairesNonRealisation!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Observations précédentes :",
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange.shade900)),
+                        const SizedBox(height: 6),
+                        ...c.commentairesNonRealisation!.map((commentaire) {
+                          return Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              margin: const EdgeInsets.only(bottom: 6),
+                              decoration: BoxDecoration(
+                                  color: Colors.orange.shade100,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: Colors.orange.shade200)),
+                              child: Text(
+                                "${commentaire.texte}\n- ${commentaire.auteurNomPrenom} le ${_formatDateSimple(commentaire.date, showTime: true)}",
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.orange.shade900),
+                              ));
+                        }),
+                      ],
+                    ),
+                  ),
+
+                if (c.estValidee && peutAgirSurConsigne)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10.0),
+                    child: _buildChampObservation(
+                      context: context,
+                      consigne: c,
+                      controller: _obsValidationControllers[c.id]!,
+                      label: "Observation (après validation) :",
+                      hint: "Détails supplémentaires...",
+                      onSave: (texteObservation) {
+                        _enregistrerObservationValidation(c, texteObservation);
+                      },
+                      backgroundColor: Colors.green.shade50,
+                      iconColor: Colors.green.shade800,
+                    ),
+                  ),
+
+                if (c.commentaireValidation != null &&
+                    c.commentaireValidation!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10.0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                          color: Colors.green.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.green.shade200)),
+                      child: Text(
+                        "Validation : ${c.commentaireValidation!}",
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.green.shade900),
+                      ),
+                    ),
+                  ),
+
+                if (c.dosimetrieInfo != null && c.dosimetrieInfo!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10.0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.blue.shade200)),
+                      child: Text(
+                        "Dosimétrie : ${c.dosimetrieInfo!}",
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.blue.shade900),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         );

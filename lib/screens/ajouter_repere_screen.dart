@@ -24,7 +24,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
 
   final Map<String, List<String>> categories = {
     "Contrôle & Protection ": [
-      "Besoin d'un de rien",
+      "Pas besoin de Micout",
       "Plaque macrelon",
       "Tapis piégeant",
       "Saut de zone",

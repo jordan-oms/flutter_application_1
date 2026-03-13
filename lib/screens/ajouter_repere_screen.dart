@@ -31,6 +31,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
       "Contaminamètre",
       "Nombre de matelas",
       "Borne à air",
+      "Nombre de protection biologique",
       "Boyau d'alimentation",
       "Boyau 10m",
       "Boyau 25m",
@@ -56,8 +57,6 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
   };
 
   final Map<String, TextEditingController> materielControllers = {};
-
-  // Stockage du type d'algorithme (UFS/BFS/Autre) pour la Borne à air
   final Map<String, String> algorithmeTypes = {};
 
   @override
@@ -66,9 +65,10 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
     categories.forEach((cat, items) {
       for (var item in items) {
         materielControllers[item] = TextEditingController(text: "0");
-        // Initialisation par défaut pour Borne à air
         if (item == "Borne à air") {
           algorithmeTypes[item] = "UFS";
+        } else if (item == "Nombre de protection biologique") {
+          algorithmeTypes[item] = "standard";
         }
       }
     });
@@ -114,11 +114,12 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
     if (user == null) return;
 
     String nomRepere = nomController.text.trim().toUpperCase();
-
     final regExpComplet = RegExp(r'^\d[A-Z]{3}\d{3}[A-Z]{2}$');
+
     if (!regExpComplet.hasMatch(nomRepere)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Format invalide ! (Ex: 1ABC123DE)"),
+        const SnackBar(
+            content: Text("Format invalide ! (Ex: 1ABC123DE)"),
             backgroundColor: Colors.red),
       );
       return;
@@ -126,13 +127,16 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
 
     setState(() => isLoading = true);
     try {
-      final userDoc = await FirebaseFirestore.instance.collection(
-          'utilisateurs').doc(user.uid).get();
-      String nomComplet = "${userDoc.data()?['prenom'] ?? ""} ${userDoc
-          .data()?['nom'] ?? ""}".trim();
+      final userDoc = await FirebaseFirestore.instance
+          .collection('utilisateurs')
+          .doc(user.uid)
+          .get();
+      String nomComplet =
+          "${userDoc.data()?['prenom'] ?? ""} ${userDoc.data()?['nom'] ?? ""}"
+              .trim();
 
-      final docRef = FirebaseFirestore.instance.collection('reperes').doc(
-          nomRepere);
+      final docRef =
+          FirebaseFirestore.instance.collection('reperes').doc(nomRepere);
       final doc = await docRef.get();
 
       if (doc.exists) {
@@ -143,16 +147,15 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         return;
       }
 
-      // Préparation des données matériels
       final Map<String, dynamic> materiels = {};
       materielControllers.forEach((key, controller) {
         final val = int.tryParse(controller.text) ?? 0;
         if (val > 0) {
-          if (key == "Borne à air") {
-            // On enregistre un objet complexe pour la borne à air
+          if (key == "Borne à air" ||
+              key == "Nombre de protection biologique") {
             materiels[key] = {
               'quantite': val,
-              'type_algo': algorithmeTypes[key] ?? "UFS"
+              'type_algo': algorithmeTypes[key] ?? "standard"
             };
           } else {
             materiels[key] = val;
@@ -185,8 +188,9 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
             content: Text("Créé avec succès"), backgroundColor: Colors.green));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erreur : $e")));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Erreur : $e")));
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -197,8 +201,8 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text(
-            "Nouveau Repère", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text("Nouveau Repère",
+            style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: oMSGreen,
         foregroundColor: Colors.black,
         elevation: 0,
@@ -239,8 +243,8 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                               controller: chantierController,
                               style: const TextStyle(
                                   color: Colors.black, fontSize: 14),
-                              decoration: _inputStyle(
-                                  "NOM DU CHANTIER", "Chantier"),
+                              decoration:
+                                  _inputStyle("NOM DU CHANTIER", "Chantier"),
                             ),
                           ),
                         ],
@@ -249,63 +253,61 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                       Row(
                         children: [
                           Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: localController,
-                              style: const TextStyle(
-                                  color: Colors.black, fontSize: 14),
-                              decoration: _inputStyle("LOCAL", "Position"),
-                            ),
-                          ),
+                              flex: 2,
+                              child: TextField(
+                                  controller: localController,
+                                  style: const TextStyle(
+                                      color: Colors.black, fontSize: 14),
+                                  decoration:
+                                      _inputStyle("LOCAL", "Position"))),
                           const SizedBox(width: 8),
                           Expanded(
-                            flex: 1,
-                            child: TextField(
-                              controller: diametreController,
-                              keyboardType: TextInputType.number,
-                              style: const TextStyle(
-                                  color: Colors.black, fontSize: 14),
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly
-                              ],
-                              decoration: _inputStyle("DIA.", "Ø").copyWith(
-                                  suffixText: "DM",
-                                  suffixStyle: const TextStyle(fontSize: 10,
-                                      fontWeight: FontWeight.bold)),
-                            ),
-                          ),
+                              flex: 1,
+                              child: TextField(
+                                  controller: diametreController,
+                                  keyboardType: TextInputType.number,
+                                  style: const TextStyle(
+                                      color: Colors.black, fontSize: 14),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly
+                                  ],
+                                  decoration: _inputStyle("DIA.", "Ø").copyWith(
+                                      suffixText: "DM",
+                                      suffixStyle: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)))),
                           const SizedBox(width: 8),
                           Expanded(
-                            flex: 1,
-                            child: TextField(
-                              controller: metrecubeController,
-                              keyboardType: TextInputType.number,
-                              style: const TextStyle(
-                                  color: Colors.black, fontSize: 14),
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly
-                              ],
-                              decoration: _inputStyle("VOL.", "M3").copyWith(
-                                  suffixText: "M3",
-                                  suffixStyle: const TextStyle(fontSize: 10,
-                                      fontWeight: FontWeight.bold)),
-                            ),
-                          ),
+                              flex: 1,
+                              child: TextField(
+                                  controller: metrecubeController,
+                                  keyboardType: TextInputType.number,
+                                  style: const TextStyle(
+                                      color: Colors.black, fontSize: 14),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly
+                                  ],
+                                  decoration: _inputStyle("VOL.", "M3")
+                                      .copyWith(
+                                          suffixText: "M3",
+                                          suffixStyle: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold)))),
                         ],
                       ),
                     ],
                   ),
                 ),
               ),
-              ...categories.entries.map((entry) =>
-                  SliverList(
+              ...categories.entries.map((entry) => SliverList(
                     delegate: SliverChildBuilderDelegate(
-                          (context, index) {
+                      (context, index) {
                         if (index == 0) {
                           return Padding(
                             padding: const EdgeInsets.fromLTRB(20, 25, 20, 10),
                             child: Text(entry.key.toUpperCase(),
-                                style: TextStyle(color: oMSGreen,
+                                style: TextStyle(
+                                    color: oMSGreen,
                                     fontWeight: FontWeight.w800,
                                     fontSize: 14)),
                           );
@@ -319,7 +321,9 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
             ],
           ),
           Positioned(
-            bottom: 20, left: 20, right: 20,
+            bottom: 20,
+            left: 20,
+            right: 20,
             child: SizedBox(
               height: 60,
               child: ElevatedButton(
@@ -332,10 +336,11 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                 ),
                 child: isLoading
                     ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text("CRÉER LE REPÈRE", style: TextStyle(
-                    color: Colors.black,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
+                    : const Text("CRÉER LE REPÈRE",
+                        style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16)),
               ),
             ),
           ),
@@ -346,23 +351,28 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
 
   Widget _buildMaterielTile(String nom) {
     bool isBorneAAir = nom == "Borne à air";
+    bool isStandard = nom == "Nombre de protection biologique";
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-      padding: isBorneAAir ? const EdgeInsets.only(bottom: 12) : null,
+      padding: (isBorneAAir || isStandard)
+          ? const EdgeInsets.only(bottom: 12)
+          : null,
       decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(15),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05),
+            BoxShadow(
+                color: Colors.black.withOpacity(0.05),
                 blurRadius: 10,
                 offset: const Offset(0, 4))
           ]),
       child: Column(
         children: [
           ListTile(
-            title: Text(nom, style: const TextStyle(
-                fontWeight: FontWeight.w600, fontSize: 15)),
+            title: Text(nom,
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
             trailing: SizedBox(
               width: 140,
               child: Row(
@@ -376,39 +386,40 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                           controller: materielControllers[nom],
                           textAlign: TextAlign.center,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                              border: InputBorder.none),
+                          decoration:
+                              const InputDecoration(border: InputBorder.none),
                           style: const TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 16),
                           onChanged: (v) => setState(() {}))),
-                  _btnCounter(
-                      Icons.add, () => _adjustValue(nom, 1), Colors.green[50]!,
-                      Colors.green[700]!),
+                  _btnCounter(Icons.add, () => _adjustValue(nom, 1),
+                      Colors.green[50]!, Colors.green[700]!),
                 ],
               ),
             ),
           ),
-          // Affichage du sélecteur uniquement pour Borne à air
+          // SÉLECTEUR SEGMENTÉ POUR BORNE À AIR
           if (isBorneAAir)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  const Text("Type : ", style: TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.bold)),
+                  const Text("Type : ",
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 8),
                   Expanded(
                     child: SegmentedButton<String>(
                       segments: const [
                         ButtonSegment(
-                            value: 'UFS', label: Text('UFS', style: TextStyle(
-                            fontSize: 10))),
+                            value: 'UFS',
+                            label: Text('UFS', style: TextStyle(fontSize: 10))),
                         ButtonSegment(
-                            value: 'BFS', label: Text('BFS', style: TextStyle(
-                            fontSize: 10))),
-                        ButtonSegment(value: 'Autre',
-                            label: Text('Autre', style: TextStyle(
-                                fontSize: 10))),
+                            value: 'BFS',
+                            label: Text('BFS', style: TextStyle(fontSize: 10))),
+                        ButtonSegment(
+                            value: 'Autre',
+                            label:
+                                Text('Autre', style: TextStyle(fontSize: 10))),
                       ],
                       selected: {algorithmeTypes[nom] ?? 'UFS'},
                       onSelectionChanged: (Set<String> newSelection) {
@@ -427,13 +438,52 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                 ],
               ),
             ),
+          // LISTE DÉROULANTE (DROPDOWN) POUR PROTECTION BIOLOGIQUE
+          if (isStandard)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: DropdownButtonFormField<String>(
+                value: algorithmeTypes[nom] ?? 'standard',
+                style: const TextStyle(color: Colors.black, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: "Type de protection",
+                  labelStyle: TextStyle(
+                      color: oMSGreen,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: oMSGreen),
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'standard', child: Text('Standard')),
+                  DropdownMenuItem(value: '1500', child: Text('1500')),
+                  DropdownMenuItem(value: 'TO/TP', child: Text('TO/TP')),
+                  DropdownMenuItem(
+                      value: 'Brique de plombs',
+                      child: Text('Briques de plomb')),
+                  DropdownMenuItem(value: 'Autre', child: Text('Autre')),
+                ],
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    setState(() {
+                      algorithmeTypes[nom] = newValue;
+                    });
+                  }
+                },
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _btnCounter(IconData icon, VoidCallback onPressed, Color bg,
-      Color fg) {
+  Widget _btnCounter(
+      IconData icon, VoidCallback onPressed, Color bg, Color fg) {
     return InkWell(
         onTap: onPressed,
         child: Container(
@@ -465,22 +515,19 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
 
 class RepereInputFormatter extends TextInputFormatter {
   @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldValue,
-      TextEditingValue newValue) {
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
     final text = newValue.text.toUpperCase();
     if (text.isEmpty) return newValue;
     for (int i = 0; i < text.length; i++) {
       final char = text[i];
       if (i == 0) {
         if (!RegExp(r'[0-9]').hasMatch(char)) return oldValue;
-      }
-      else if (i >= 1 && i <= 3) {
+      } else if (i >= 1 && i <= 3) {
         if (!RegExp(r'[A-Z]').hasMatch(char)) return oldValue;
-      }
-      else if (i >= 4 && i <= 6) {
+      } else if (i >= 4 && i <= 6) {
         if (!RegExp(r'[0-9]').hasMatch(char)) return oldValue;
-      }
-      else if (i >= 7 && i <= 8) {
+      } else if (i >= 7 && i <= 8) {
         if (!RegExp(r'[A-Z]').hasMatch(char)) return oldValue;
       }
     }

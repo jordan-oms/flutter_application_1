@@ -21,7 +21,8 @@ import './chantier_plus_screen.dart';
 import '../widgets/tranche_selector.dart';
 import '../main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_svg/flutter_svg.dart'; // Retrait du ' parasite au début
+
+import 'detail_repere_screen.dart';
 
 // Constantes pour les rôles
 const String roleAdminString = "administrateur";
@@ -140,6 +141,52 @@ class _HomeScreenState extends State<HomeScreen> {
     _observationValidationDialogController.dispose();
     _obsvalitatiobDialogDosimetrie.dispose();
     super.dispose();
+  }
+
+// Analyse le texte pour trouver un repère et redirige vers le bon écran
+  void _analyserEtNaviguerVersRepere(String texteConsigne) async {
+    // Format : 1 chiffre, 3 lettres, 3 chiffres, 2 lettres
+    final regExpRepere = RegExp(r'\d[A-Z]{3}\d{3}[A-Z]{2}');
+    final match = regExpRepere.firstMatch(texteConsigne.toUpperCase());
+
+    if (match != null) {
+      String repereId = match.group(0)!;
+
+      // Vérifier si le repère existe dans Firestore avant d'ouvrir
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('reperes')
+            .doc(repereId)
+            .get();
+
+        if (doc.exists) {
+          // Si le repère existe, on ouvre directement ses détails
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DetailRepereScreen(repereId: repereId),
+            ),
+          );
+        } else {
+          // Si le repère est trouvé dans le texte mais pas en base, on va sur Chantier+
+          _allerVersChantierPlus();
+        }
+      } catch (e) {
+        _allerVersChantierPlus();
+      }
+    } else {
+      // Aucun repère trouvé dans le texte -> Chantier+
+      _allerVersChantierPlus();
+    }
+  }
+
+// Fonction de secours pour naviguer vers Chantier+
+  void _allerVersChantierPlus() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ChantierPlusScreen()),
+    );
   }
 
   void _presenterAjoutConsigne() {
@@ -1297,7 +1344,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (consignes.isEmpty) {
       return const Center(
-          child: Text("Aucune consigne active pour cette tranche."));
+        child: Text("Aucune consigne active pour cette tranche."),
+      );
     }
 
     final bool peutAgirSurConsigne = (_userRoles.contains(roleAdminString) ||
@@ -1315,311 +1363,289 @@ class _HomeScreenState extends State<HomeScreen> {
                 _userRoles.contains(roleChefDeChantierString)) &&
             _currentUser != null;
 
-    void _supprimerConsigne(Consigne c) {
-      _obsNonRealiseeControllers.remove(c.id)?.dispose();
-      _obsValidationControllers.remove(c.id)?.dispose();
-      _deleteConsigneDB(c.id);
-    }
-
     return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 150),
+      padding: const EdgeInsets.only(bottom: 120),
       itemCount: consignes.length,
       itemBuilder: (context, index) {
         final c = consignes[index];
 
-        // Initialisation des contrôleurs
-        if (!_obsNonRealiseeControllers.containsKey(c.id)) {
-          _obsNonRealiseeControllers[c.id] = TextEditingController();
-        }
-        if (!_obsValidationControllers.containsKey(c.id)) {
-          _obsValidationControllers[c.id] = TextEditingController(
+        _obsNonRealiseeControllers.putIfAbsent(
+          c.id,
+          () => TextEditingController(),
+        );
+        _obsValidationControllers.putIfAbsent(
+          c.id,
+          () => TextEditingController(
             text: c.commentaireValidation?.split('\n-').first.trim() ?? "",
-          );
-        } else {
-          final currentControllerText = _obsValidationControllers[c.id]!.text;
-          final currentDataComment =
-              c.commentaireValidation?.split('\n-').first.trim() ?? "";
-          if (currentControllerText != currentDataComment) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && _obsValidationControllers.containsKey(c.id)) {
-                _obsValidationControllers[c.id]!.text = currentDataComment;
-              }
-            });
-          }
-        }
+          ),
+        );
 
-        // 🔹 RETRAIT DU DISMISSIBLE : On retourne directement la Card
+        final bool estPrioritaireActive = c.estPrioritaire && !c.estValidee;
+
         return Card(
           key: ValueKey(c.id),
-          color: c.estPrioritaire && !c.estValidee
+          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          color: estPrioritaireActive
               ? Colors.red.shade50
-              : (c.estValidee ? Colors.green.shade50 : Colors.grey.shade100),
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          elevation: c.estPrioritaire && !c.estValidee ? 4.0 : 2.0,
+              : (c.estValidee ? Colors.green.shade50 : Colors.white),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8.0),
-            side: c.estPrioritaire && !c.estValidee
-                ? BorderSide(color: Colors.red.shade200, width: 1.5)
-                : BorderSide(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(
+              color: estPrioritaireActive
+                  ? Colors.red.shade300
+                  : Colors.grey.shade200,
+            ),
           ),
+          elevation: 1.5,
           child: Padding(
-            padding: const EdgeInsets.all(12.0),
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // LIGNE PRINCIPALE
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // -- WIDGET CHECKBOX --
-                    if (peutAgirSurConsigne)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8.0, top: 6.0),
-                        child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: Checkbox(
-                            value: c.estValidee,
-                            onChanged: (val) {
-                              if (val != null) {
-                                _presenterValidationConsigne(c, val);
-                              }
-                            },
-                            activeColor: Colors.green.shade600,
-                            checkColor: Colors.white,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ),
-                      ),
-                    if (!peutAgirSurConsigne)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8.0, top: 10.0),
-                        child: Icon(
-                          c.estValidee
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          color: c.estValidee
-                              ? Colors.green.shade600
-                              : Colors.grey.shade400,
-                          size: 24,
-                        ),
-                      ),
+                    // Checkbox / statut
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: peutAgirSurConsigne
+                          ? Checkbox(
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              value: c.estValidee,
+                              onChanged: (val) {
+                                if (val != null) {
+                                  _presenterValidationConsigne(c, val);
+                                }
+                              },
+                            )
+                          : Icon(
+                              c.estValidee
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              color: c.estValidee ? Colors.green : Colors.grey,
+                              size: 22,
+                            ),
+                    ),
 
-                    // -- TEXTE --
+                    const SizedBox(width: 8),
+
+                    // TEXTE PRINCIPAL
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            c.contenu,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: c.estPrioritaire && !c.estValidee
-                                  ? FontWeight.bold
-                                  : FontWeight.w600,
-                              color: c.estPrioritaire && !c.estValidee
-                                  ? Colors.red.shade800
-                                  : (c.estValidee
-                                      ? Colors.grey.shade700
-                                      : Colors.black87),
-                              decoration: c.estValidee
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              decorationColor: Colors.grey.shade700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            "Créée par: ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${_formatDateSimple(c.dateEmission, showTime: false)}",
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontStyle: FontStyle.italic,
-                                color: Colors.grey.shade600),
-                          ),
-                          if (c.categorie != null && c.categorie!.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4.0),
-                              child: Text("Catégorie: ${c.categorie}",
+                          // Titre + éventuel badge PRIORITAIRE sur la même ligne
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  c.contenu,
                                   style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.blueGrey.shade700)),
-                            ),
-                          if (c.enjeu != null && c.enjeu!.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4.0),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.shield_outlined,
-                                      color: Colors.blue.shade700, size: 14),
-                                  const SizedBox(width: 4),
-                                  Text("Enjeu: ${c.enjeu}",
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.blue.shade800,
-                                          fontWeight: FontWeight.w500)),
-                                ],
+                                    fontSize: 15,
+                                    height: 1.2,
+                                    fontWeight: estPrioritaireActive
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: estPrioritaireActive
+                                        ? Colors.red.shade800
+                                        : (c.estValidee
+                                            ? Colors.grey.shade700
+                                            : Colors.black87),
+                                    decoration: c.estValidee
+                                        ? TextDecoration.lineThrough
+                                        : null,
+                                  ),
+                                ),
                               ),
+                              if (estPrioritaireActive) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade100,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    "PRIORITAIRE",
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.red.shade800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+
+                          const SizedBox(height: 4),
+
+                          // Ligne méta (auteur + date)
+                          Text(
+                            "Créée par ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${_formatDateSimple(c.dateEmission)}",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+
+                          const SizedBox(height: 4),
+
+                          // Ligne chips (catégorie + enjeu) sur une seule ligne quand possible
+                          if ((c.categorie != null &&
+                                  c.categorie!.isNotEmpty) ||
+                              (c.enjeu != null && c.enjeu!.isNotEmpty))
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: -4,
+                              children: [
+                                if (c.categorie != null &&
+                                    c.categorie!.isNotEmpty)
+                                  Chip(
+                                    label: Text(c.categorie!),
+                                    backgroundColor: Colors.blueGrey.shade50,
+                                    labelStyle: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.blueGrey.shade800,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 0,
+                                    ),
+                                    visualDensity: VisualDensity.compact,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                if (c.enjeu != null && c.enjeu!.isNotEmpty)
+                                  Chip(
+                                    avatar: const Icon(
+                                      Icons.shield_outlined,
+                                      size: 13,
+                                    ),
+                                    label: Text(c.enjeu!),
+                                    backgroundColor: Colors.blue.shade50,
+                                    labelStyle: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.blue.shade900,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 0,
+                                    ),
+                                    visualDensity: VisualDensity.compact,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                              ],
                             ),
                         ],
                       ),
                     ),
 
-                    // -- BOUTONS DROITE --
-                    SizedBox(
-                      width: 44,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          if (peutModifierConsigne && !c.estValidee)
-                            IconButton(
-                              icon: Icon(Icons.edit_outlined,
-                                  color: Colors.blue.shade700, size: 22),
-                              tooltip: "Modifier la consigne",
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              onPressed: () =>
-                                  _presenterModificationConsigne(c),
-                            ),
-                          if (peutAgirSurConsigne && !c.estValidee)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 12.0),
-                              child: IconButton(
-                                icon: Icon(Icons.gps_fixed,
-                                    color: Colors.blueGrey.shade700, size: 22),
-                                tooltip: "Voir dans Chantier+",
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (context) =>
-                                            const ChantierPlusScreen()),
-                                  );
-                                },
-                              ),
-                            ),
-                          if (peutSupprimerConsigneNonValidee && !c.estValidee)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 12.0),
-                              child: IconButton(
-                                icon: Icon(Icons.delete_outline,
-                                    color: Colors.red.shade700, size: 22),
-                                tooltip: "Supprimer la consigne",
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () =>
-                                    _confirmerSuppressionConsigne(c),
-                              ),
-                            ),
-                        ],
-                      ),
+                    const SizedBox(width: 4),
+
+                    // ACTIONS
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (peutModifierConsigne && !c.estValidee)
+                          IconButton(
+                            icon: const Icon(Icons.edit, size: 20),
+                            tooltip: "Modifier",
+                            padding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => _presenterModificationConsigne(c),
+                          ),
+                        if (peutAgirSurConsigne && !c.estValidee)
+                          IconButton(
+                            icon: const Icon(Icons.gps_fixed, size: 20),
+                            tooltip: "Localiser",
+                            padding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () =>
+                                _analyserEtNaviguerVersRepere(c.contenu),
+                          ),
+                        if (peutSupprimerConsigneNonValidee && !c.estValidee)
+                          IconButton(
+                            icon: const Icon(Icons.delete, size: 20),
+                            tooltip: "Supprimer",
+                            padding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => _confirmerSuppressionConsigne(c),
+                          ),
+                      ],
                     ),
                   ],
                 ),
 
-                // 🔹 Widgets d'observations
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
+
+                // OBSERVATION NON REALISATION (champ visible)
                 if (!c.estValidee && peutAgirSurConsigne)
                   _buildChampObservation(
                     context: context,
                     consigne: c,
                     controller: _obsNonRealiseeControllers[c.id]!,
-                    label: "Observation (si non réalisée / en attente) :",
-                    hint: "Raison de la non-réalisation, action corrective...",
-                    onSave: (texteNouvelleObservation) {
-                      _enregistrerObservationNonRealisation(
-                          c, texteNouvelleObservation);
+                    label: "Observation (si non réalisée)",
+                    hint: "Raison de la non réalisation...",
+                    onSave: (texte) {
+                      _enregistrerObservationNonRealisation(c, texte);
                     },
                     backgroundColor: Colors.orange.shade50,
                     iconColor: Colors.orange.shade800,
                   ),
 
+                // HISTORIQUE DES OBSERVATIONS NON REALISEES (déroulant)
                 if (c.commentairesNonRealisation != null &&
                     c.commentairesNonRealisation!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("Observations précédentes :",
-                            style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.orange.shade900)),
-                        const SizedBox(height: 6),
-                        ...c.commentairesNonRealisation!.map((commentaire) {
-                          return Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(8),
-                              margin: const EdgeInsets.only(bottom: 6),
-                              decoration: BoxDecoration(
-                                  color: Colors.orange.shade100,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                      color: Colors.orange.shade200)),
-                              child: Text(
-                                "${commentaire.texte}\n- ${commentaire.auteurNomPrenom} le ${_formatDateSimple(commentaire.date, showTime: true)}",
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.orange.shade900),
-                              ));
-                        }),
-                      ],
-                    ),
+                  _buildChampObservationDeroulant(
+                    context: context,
+                    commentaires: c.commentairesNonRealisation!,
+                    label: "Observations précédentes",
+                    backgroundColor: Colors.orange.shade100,
+                    iconColor: Colors.orange.shade800,
                   ),
 
+                // OBSERVATION VALIDATION (champ visible)
                 if (c.estValidee && peutAgirSurConsigne)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10.0),
-                    child: _buildChampObservation(
-                      context: context,
-                      consigne: c,
-                      controller: _obsValidationControllers[c.id]!,
-                      label: "Observation (après validation) :",
-                      hint: "Détails supplémentaires...",
-                      onSave: (texteObservation) {
-                        _enregistrerObservationValidation(c, texteObservation);
-                      },
-                      backgroundColor: Colors.green.shade50,
-                      iconColor: Colors.green.shade800,
-                    ),
+                  _buildChampObservation(
+                    context: context,
+                    consigne: c,
+                    controller: _obsValidationControllers[c.id]!,
+                    label: "Observation après validation",
+                    hint: "Ajouter un commentaire...",
+                    onSave: (texte) {
+                      _enregistrerObservationValidation(c, texte);
+                    },
+                    backgroundColor: Colors.green.shade50,
+                    iconColor: Colors.green.shade800,
                   ),
 
-                if (c.commentaireValidation != null &&
-                    c.commentaireValidation!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10.0),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                          color: Colors.green.shade100,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.green.shade200)),
-                      child: Text(
-                        "Validation : ${c.commentaireValidation!}",
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.green.shade900),
-                      ),
-                    ),
-                  ),
-
+                // DOSIMETRIE
                 if (c.dosimetrieInfo != null && c.dosimetrieInfo!.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(top: 10.0),
+                    padding: const EdgeInsets.only(top: 6),
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.blue.shade200)),
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                       child: Text(
                         "Dosimétrie : ${c.dosimetrieInfo!}",
                         style: TextStyle(
-                            fontSize: 13, color: Colors.blue.shade900),
+                          fontSize: 12,
+                          color: Colors.blue.shade900,
+                        ),
                       ),
                     ),
                   ),
@@ -1628,6 +1654,62 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildChampObservationDeroulant({
+    required BuildContext context,
+    required List<Commentaire> commentaires,
+    required String label,
+    required Color backgroundColor,
+    required Color iconColor,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: iconColor.withOpacity(0.4)),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 10),
+        collapsedIconColor: iconColor,
+        iconColor: iconColor,
+        childrenPadding: const EdgeInsets.only(bottom: 6),
+        title: Row(
+          children: [
+            Icon(Icons.comment_outlined, color: iconColor, size: 18),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: iconColor,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        children: commentaires.map((commentaire) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(10, 4, 10, 2),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: backgroundColor.withOpacity(0.55),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                "${commentaire.texte}\n- ${commentaire.auteurNomPrenom} le ${_formatDateSimple(commentaire.date, showTime: true)}",
+                style: TextStyle(fontSize: 11.5, color: iconColor),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -1641,52 +1723,71 @@ class _HomeScreenState extends State<HomeScreen> {
     Color backgroundColor = Colors.white,
     Color iconColor = Colors.grey,
   }) {
-    // ... (Cette fonction reste la même)
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 4),
-        TextField(
-          controller: controller,
-          maxLines: null,
-          minLines: 1,
-          textInputAction: TextInputAction.done,
-          decoration: InputDecoration(
-            hintText: hint,
-            filled: true,
-            fillColor: backgroundColor,
-            isDense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6.0),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6.0),
-              borderSide: BorderSide(color: Colors.grey.shade400),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6.0),
-              borderSide:
-                  BorderSide(color: Theme.of(context).primaryColor, width: 1.5),
-            ),
-            suffixIcon: IconButton(
-              icon: Icon(Icons.save_alt_outlined, color: iconColor, size: 20),
-              tooltip: "Enregistrer l'observation",
-              onPressed: () {
-                onSave(controller.text.trim());
-                FocusScope.of(context).unfocus(); // Cacher le clavier
-              },
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          onSubmitted: (text) {
-            onSave(text.trim());
-          },
-        ),
-      ],
+          const SizedBox(height: 3),
+          TextField(
+            controller: controller,
+            maxLines: null,
+            minLines: 1,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade500,
+              ),
+              filled: true,
+              fillColor: backgroundColor,
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6.0),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6.0),
+                borderSide: BorderSide(color: Colors.grey.shade400),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6.0),
+                borderSide: BorderSide(
+                    color: Theme.of(context).primaryColor, width: 1.4),
+              ),
+              suffixIconConstraints:
+                  const BoxConstraints(minHeight: 32, minWidth: 32),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  Icons.save_alt_outlined,
+                  color: iconColor,
+                  size: 19,
+                ),
+                tooltip: "Enregistrer l'observation",
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                onPressed: () {
+                  onSave(controller.text.trim());
+                  FocusScope.of(context).unfocus();
+                },
+              ),
+            ),
+            onSubmitted: (text) {
+              onSave(text.trim());
+            },
+          ),
+        ],
+      ),
     );
   }
 

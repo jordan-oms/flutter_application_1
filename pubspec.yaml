@@ -23,7 +23,7 @@ dependencies:
   file_saver: ^0.3.1
   flutter_svg: ^2.0.10+1
   intl: ^0.20.2  # Obligatoire pour le formatage des dates qu'on a ajouté
-
+  csv: ^6.0.0
 
 
 

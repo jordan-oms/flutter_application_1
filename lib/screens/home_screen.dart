@@ -560,15 +560,16 @@ class _HomeScreenState extends State<HomeScreen> {
     if (estValideeMaintenant) {
       _presenterDialogObservationValidation(consigne);
     } else {
-      // --- CORRECTION 2 : EFFACEMENT DE LA DOSIMETRIE LORS DE L'INVALIDATION ---
+      // --- MODIFICATION ICI : On ajoute clearNomPrenomValidation ---
       Consigne consigneMiseAJour = consigne.copyWith(
         estValidee: false,
         clearDateValidation: true,
         clearCommentaireValidation: true,
         clearIdAuteurValidation: true,
-        clearDosimetrieInfo: true, // On efface aussi les infos de dosimétrie
+        clearNomPrenomValidation: true,
+        // <--- AJOUTEZ CETTE LIGNE
+        clearDosimetrieInfo: true,
       );
-      // --- FIN DE LA CORRECTION ---
       _updateConsigneDB(consigneMiseAJour);
     }
   }
@@ -617,6 +618,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             ElevatedButton(
               child: const Text('SUIVANT : DOSIMÉTRIE'),
+              // ... à l'intérieur de ElevatedButton (SUIVANT : DOSIMÉTRIE)
               onPressed: () {
                 final String observationTexte =
                     _observationValidationDialogController.text.trim();
@@ -627,8 +629,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 }
                 Navigator.of(dialogContext).pop();
                 _observationValidationDialogController.clear();
-                _lancerDialogueDosimetrie(
-                    consigneAValider, commentaireAvecAuteur);
+
+                // --- MODIFICATION ICI : On passe les nouvelles infos au copyWith ---
+                final consignePrete = consigneAValider.copyWith(
+                  estValidee: true,
+                  dateValidation: DateTime.now(),
+                  idAuteurValidation: _currentUser!.uid,
+                  nomPrenomValidation: _currentUserNomPrenom,
+                  // <--- ON ENREGISTRE LE NOM ICI
+                  commentaireValidation: commentaireAvecAuteur.isNotEmpty
+                      ? commentaireAvecAuteur
+                      : null,
+                );
+
+                _lancerDialogueDosimetrie(consignePrete, commentaireAvecAuteur);
               },
             ),
           ],
@@ -639,17 +653,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _lancerDialogueDosimetrie(
       Consigne consigne, String commentaireInitial) {
-    // Cette fonction est déjà parfaite et n'a pas besoin de changement.
     return showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return DosimetrieDialog(
           consigneAValider: consigne,
+          // 'consigne' contient déjà le nomPrenomValidation ici
           commentaireInitial: commentaireInitial,
           currentUserUid: _currentUser!.uid,
           onUpdateConsigne: (consigneMiseAJour) {
-            _updateConsigneDB(consigneMiseAJour);
+            _updateConsigneDB(
+                consigneMiseAJour); // Enregistre tout dans Firebase
           },
         );
       },

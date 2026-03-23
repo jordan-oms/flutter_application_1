@@ -1,9 +1,8 @@
 // lib/model/consigne.dart
 
-import 'package:cloud_firestore/cloud_firestore.dart'
-    as fs; // Utilisation de l'alias fs
+import 'package:cloud_firestore/cloud_firestore.dart' as fs;
 import 'package:flutter/foundation.dart';
-import '/model/commentaire.dart'; // Assurez-vous que le chemin est correct
+import '/model/commentaire.dart';
 
 class Consigne {
   final String id;
@@ -20,10 +19,9 @@ class Consigne {
   final DateTime? dateValidation;
   final String? commentaireValidation;
   final String? idAuteurValidation;
+  final String? nomPrenomValidation; // Stocke le Nom Prénom de celui qui valide
   final List<Commentaire>? commentairesNonRealisation;
   final bool estNonRealiseeEffectivement;
-
-  // 1. AJOUT DU NOUVEAU CHAMP
   final String? dosimetrieInfo;
 
   Consigne({
@@ -41,10 +39,9 @@ class Consigne {
     this.dateValidation,
     this.commentaireValidation,
     this.idAuteurValidation,
+    this.nomPrenomValidation,
     this.commentairesNonRealisation,
     this.estNonRealiseeEffectivement = false,
-
-    // 2. AJOUT DU CHAMP AU CONSTRUCTEUR
     this.dosimetrieInfo,
   });
 
@@ -55,16 +52,6 @@ class Consigne {
       parsedCommentairesNonRealisation = rawCommentairesNonRealisation
           .map((data) => Commentaire.fromJson(data as Map<String, dynamic>))
           .toList();
-    } else if (rawCommentairesNonRealisation is Map) {
-      try {
-        parsedCommentairesNonRealisation = [
-          Commentaire.fromJson(
-              rawCommentairesNonRealisation as Map<String, dynamic>)
-        ];
-      } catch (e, s) {
-        debugPrint(
-            "Erreur de désérialisation de l'ancien format de commentaireNonRealisation: $e\nStackTrace: $s");
-      }
     }
 
     return Consigne(
@@ -82,11 +69,10 @@ class Consigne {
       dateValidation: (json['dateValidation'] as fs.Timestamp?)?.toDate(),
       commentaireValidation: json['commentaireValidation'] as String?,
       idAuteurValidation: json['idAuteurValidation'] as String?,
+      nomPrenomValidation: json['nomPrenomValidation'] as String?,
       commentairesNonRealisation: parsedCommentairesNonRealisation,
       estNonRealiseeEffectivement:
           json['estNonRealiseeEffectivement'] as bool? ?? false,
-
-      // 3. AJOUT DE LA LECTURE DEPUIS JSON
       dosimetrieInfo: json['dosimetrieInfo'] as String?,
     );
   }
@@ -109,12 +95,10 @@ class Consigne {
           : null,
       'commentaireValidation': commentaireValidation,
       'idAuteurValidation': idAuteurValidation,
-      'commentairesNonRealisation': commentairesNonRealisation
-          ?.map((commentaire) => commentaire.toJson())
-          .toList(),
+      'nomPrenomValidation': nomPrenomValidation,
+      'commentairesNonRealisation':
+          commentairesNonRealisation?.map((c) => c.toJson()).toList(),
       'estNonRealiseeEffectivement': estNonRealiseeEffectivement,
-
-      // 4. AJOUT DE L'ÉCRITURE VERS JSON
       'dosimetrieInfo': dosimetrieInfo,
     };
   }
@@ -134,15 +118,15 @@ class Consigne {
     DateTime? dateValidation,
     String? commentaireValidation,
     String? idAuteurValidation,
+    String? nomPrenomValidation,
     List<Commentaire>? commentairesNonRealisation,
     bool? estNonRealiseeEffectivement,
-
-    // 5. AJOUT DU CHAMP DOSIMETRIE DANS copyWith
     String? dosimetrieInfo,
     bool clearDosimetrieInfo = false,
     bool clearCommentaireValidation = false,
     bool clearDateValidation = false,
     bool clearIdAuteurValidation = false,
+    bool clearNomPrenomValidation = false,
     bool clearCommentairesNonRealisation = false,
   }) {
     return Consigne(
@@ -158,27 +142,24 @@ class Consigne {
       categorie: categorie ?? this.categorie,
       enjeu: (enjeu is Function) ? enjeu() : (enjeu ?? this.enjeu) as String?,
       estValidee: estValidee ?? this.estValidee,
-      dateValidation: clearDateValidation
-          ? null
-          : (dateValidation ??
-              ((estValidee != null && !estValidee)
-                  ? null
-                  : this.dateValidation)),
+      dateValidation:
+          clearDateValidation ? null : (dateValidation ?? this.dateValidation),
       commentaireValidation: clearCommentaireValidation
           ? null
-          : commentaireValidation ?? this.commentaireValidation,
+          : (commentaireValidation ?? this.commentaireValidation),
       idAuteurValidation: clearIdAuteurValidation
           ? null
           : (idAuteurValidation ?? this.idAuteurValidation),
+      nomPrenomValidation: clearNomPrenomValidation
+          ? null
+          : (nomPrenomValidation ?? this.nomPrenomValidation),
       commentairesNonRealisation: clearCommentairesNonRealisation
-          ? [] // On met une liste vide plutôt que null pour éviter les erreurs
-          : commentairesNonRealisation ?? this.commentairesNonRealisation,
+          ? []
+          : (commentairesNonRealisation ?? this.commentairesNonRealisation),
       estNonRealiseeEffectivement:
           estNonRealiseeEffectivement ?? this.estNonRealiseeEffectivement,
-
-      // AJOUT DE LA LOGIQUE DANS copyWith
       dosimetrieInfo:
-          clearDosimetrieInfo ? null : dosimetrieInfo ?? this.dosimetrieInfo,
+          clearDosimetrieInfo ? null : (dosimetrieInfo ?? this.dosimetrieInfo),
     );
   }
 }

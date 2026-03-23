@@ -32,6 +32,9 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
   Map<String, String> algorithmeTypes = {};
   Map<String, String> initialAlgoTypes = {};
 
+  // --- NOUVEAU : SIMULATION PHOTOS ---
+  List<String> selectedImages = [];
+
   String createdBy = "";
   Timestamp? createdAt;
   String lastModifiedBy = "Aucune";
@@ -262,6 +265,12 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
           : CustomScrollView(
               slivers: [
                 _buildGridHeader(),
+
+                // --- SECTION DOCUMENTATION VISUELLE COMPACTE ---
+                SliverToBoxAdapter(
+                  child: _buildCompactMediaSection(),
+                ),
+
                 ...categories.entries.map((entry) {
                   final itemsToShow = isEditing
                       ? entry.value
@@ -304,6 +313,111 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                 color: Colors.black, fontWeight: FontWeight.bold)),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+
+  // --- BARRE DE MÉDIAS COMPACTE ET PROFESSIONNELLE ---
+  Widget _buildCompactMediaSection() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 15, 16, 5),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.camera_alt_outlined,
+                  size: 18, color: Colors.grey.shade700),
+              const SizedBox(width: 8),
+              const Text("VISUELS DU REPÈRE",
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5)),
+              const Spacer(),
+
+              // Bouton d'ajout : Visible uniquement en mode EDITION
+              if (isEditing)
+                Material(
+                  color: oMSGreen.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() => selectedImages.add("img_test"));
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      child: Row(
+                        children: [
+                          Icon(Icons.add, size: 14, color: oMSGreen),
+                          const SizedBox(width: 4),
+                          Text("AJOUTER",
+                              style: TextStyle(
+                                  color: oMSGreen,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (selectedImages.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 55,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: selectedImages.length,
+                itemBuilder: (context, index) {
+                  return Stack(
+                    children: [
+                      Container(
+                        width: 55,
+                        height: 55,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Icon(Icons.image_outlined,
+                            size: 20, color: Colors.grey.shade400),
+                      ),
+
+                      // Bouton de suppression : Visible uniquement pour l'ADMIN
+                      if (isAdmin)
+                        Positioned(
+                          top: 0,
+                          right: 8,
+                          child: GestureDetector(
+                            onTap: () =>
+                                setState(() => selectedImages.removeAt(index)),
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                  color: Colors.red, shape: BoxShape.circle),
+                              padding: const EdgeInsets.all(2),
+                              child: const Icon(Icons.close,
+                                  size: 10, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -467,26 +581,26 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
               const SizedBox(width: 10),
               Expanded(
                   child: _buildHeaderField(chantierController, "CHANTIER",
-                      enabled: isEditing)), // Tout le monde peut éditer
+                      enabled: isEditing)),
             ]),
             const SizedBox(height: 12),
             Row(children: [
               Expanded(
                   flex: 2,
                   child: _buildHeaderField(localController, "LOCAL",
-                      enabled: isEditing && isAdmin)), // Admin uniquement
+                      enabled: isEditing && isAdmin)),
               const SizedBox(width: 8),
               Expanded(
                   flex: 1,
                   child: _buildHeaderNumberField(
                       diametreController, "DIA.", "DM",
-                      enabled: isEditing && isAdmin)), // Admin uniquement
+                      enabled: isEditing && isAdmin)),
               const SizedBox(width: 8),
               Expanded(
                   flex: 1,
                   child: _buildHeaderNumberField(
                       metrecubeController, "VOL.", "M3",
-                      enabled: isEditing && isAdmin)), // Admin uniquement
+                      enabled: isEditing && isAdmin)),
             ]),
             const SizedBox(height: 15),
             _buildTraceabilityBox(formatDate),

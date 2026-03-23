@@ -1,8 +1,7 @@
 // lib/screens/archive_screen.dart
 
 import 'package:flutter/material.dart';
-import '../model/consigne.dart'; // Assurez-vous que le chemin est correct
-// Assurez-vous que le fichier excel_screen.dart existe bien dans le dossier screens
+import '../model/consigne.dart';
 import 'excel_screen.dart';
 
 // Constantes nécessaires
@@ -42,9 +41,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     super.initState();
     _searchController.addListener(() {
       if (mounted) {
-        setState(() {
-          _searchQuery = _searchController.text;
-        });
+        setState(() => _searchQuery = _searchController.text);
       }
     });
   }
@@ -55,6 +52,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     super.dispose();
   }
 
+  // Formate la date pour l'affichage
   String _formatDateSimple(DateTime? date, {bool showTime = true}) {
     if (date == null) return 'Date inconnue';
     String day = date.day.toString().padLeft(2, '0');
@@ -66,6 +64,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       return "$day/$month/$year $hour:$minute";
     }
     return "$day/$month/$year";
+  }
+
+  // Formate la date pour servir de clé de groupe (YYYY-MM-DD)
+  String _getDateKey(DateTime date) {
+    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
   }
 
   Widget _buildBlocHeader(String title,
@@ -80,37 +83,28 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
                     color: headerColor.shade900))),
-        Text(_formatDateSimple(DateTime.now(), showTime: false),
-            style: TextStyle(fontSize: 14, color: headerColor.shade700)),
+        Icon(Icons.history, color: headerColor.shade700),
       ]),
     );
   }
 
   Future<void> _confirmerEtSupprimerConsigneArchivee(Consigne consigne) async {
-    // ... (Cette fonction reste inchangée)
-    if (!widget.userRoles.contains(roleAdminString)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Action non autorisée.")),
-        );
-      }
-      return;
-    }
+    if (!widget.userRoles.contains(roleAdminString)) return;
+
     final bool confirmation = await showDialog<bool>(
           context: context,
           builder: (BuildContext dialogContext) {
             return AlertDialog(
-              title: const Text('Confirmer la suppression'),
+              title: const Text('Suppression définitive'),
               content: Text(
-                  "Êtes-vous sûr de vouloir supprimer définitivement l'archive : ${consigne.contenu} ? Cette action est irréversible."),
+                  "Voulez-vous supprimer définitivement l'archive : ${consigne.contenu} ?"),
               actions: <Widget>[
                 TextButton(
-                  child: const Text('ANNULER'),
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                ),
+                    child: const Text('ANNULER'),
+                    onPressed: () => Navigator.of(dialogContext).pop(false)),
                 TextButton(
                   style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  child: const Text('SUPPRIMER DÉFINITIVEMENT'),
+                  child: const Text('SUPPRIMER'),
                   onPressed: () => Navigator.of(dialogContext).pop(true),
                 ),
               ],
@@ -120,50 +114,24 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         false;
 
     if (confirmation) {
-      try {
-        widget.obsNonRealiseeControllers.remove(consigne.id)?.dispose();
-        widget.obsValidationControllers.remove(consigne.id)?.dispose();
-        await widget.deleteConsigneDB(consigne.id);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    'Archive "${consigne.contenu}" supprimée définitivement.')),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    "Erreur lors de la suppression de l'archive : ${e.toString()}")),
-          );
-        }
-      }
+      await widget.deleteConsigneDB(consigne.id);
     }
   }
 
   Widget _buildSearchBar() {
-    // ... (Cette fonction reste inchangée)
     return Padding(
       padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 12.0),
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
-          hintText: 'Rechercher dans les archives...',
+          hintText: 'Rechercher un contenu, auteur, catégorie...',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
                   icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _searchController.clear();
-                  },
-                )
+                  onPressed: () => _searchController.clear())
               : null,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30.0),
-            borderSide: const BorderSide(color: Colors.grey),
-          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(30.0)),
           filled: true,
           fillColor: Colors.white,
           contentPadding:
@@ -176,15 +144,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   @override
   Widget build(BuildContext context) {
     if (widget.selectedTranche == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: widget.tranches.isEmpty
-              ? const Text("Aucune tranche n'est configurée pour les archives.")
-              : const Text(
-                  "Veuillez sélectionner une tranche pour voir les archives."),
-        ),
-      );
+      return const Center(child: Text("Veuillez sélectionner une tranche."));
     }
 
     return StreamBuilder<List<Consigne>>(
@@ -192,199 +152,170 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting &&
             !snapshot.hasData) {
-          return const Center(
-              child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.teal)));
-        }
-        if (snapshot.hasError) {
-          return Center(
-              child: Text('Erreur chargement archives: ${snapshot.error}'));
+          return const Center(child: CircularProgressIndicator());
         }
 
-        final toutesLesArchives =
+        // 1. Filtrage par recherche
+        final archivesInitiales =
             (snapshot.data ?? []).where((c) => c.estValidee).toList();
+        final filteredArchives = archivesInitiales.where((c) {
+          final q = _searchQuery.toLowerCase();
+          return c.contenu.toLowerCase().contains(q) ||
+              (c.nomPrenomValidation?.toLowerCase().contains(q) ?? false) ||
+              (c.categorie?.toLowerCase().contains(q) ?? false);
+        }).toList();
 
-        final List<Consigne> consignesFiltrees;
-        if (_searchQuery.isNotEmpty) {
-          consignesFiltrees = toutesLesArchives.where((consigne) {
-            final query = _searchQuery.toLowerCase();
-            return consigne.contenu.toLowerCase().contains(query) ||
-                (consigne.categorie?.toLowerCase().contains(query) ?? false) ||
-                consigne.auteurNomPrenomCreation
-                    .toLowerCase()
-                    .contains(query) ||
-                (consigne.commentaireValidation
-                        ?.toLowerCase()
-                        .contains(query) ??
-                    false) ||
-                // AJOUT DU NOUVEAU CHAMP À LA RECHERCHE
-                (consigne.dosimetrieInfo?.toLowerCase().contains(query) ??
-                    false);
-          }).toList();
-        } else {
-          consignesFiltrees = toutesLesArchives;
+        // 2. Groupement par date
+        Map<String, List<Consigne>> groupedArchives = {};
+        for (var c in filteredArchives) {
+          if (c.dateValidation != null) {
+            String key = _getDateKey(c.dateValidation!);
+            if (!groupedArchives.containsKey(key)) groupedArchives[key] = [];
+            groupedArchives[key]!.add(c);
+          }
         }
+
+        // 3. Tri des dates (du plus récent au plus ancien)
+        List<String> sortedKeys = groupedArchives.keys.toList()
+          ..sort((a, b) => b.compareTo(a));
 
         return Stack(
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildBlocHeader(
-                    "Archives (Consignes) - ${widget.selectedTranche}",
+                _buildBlocHeader("Archives - ${widget.selectedTranche}",
                     headerColor: Colors.teal),
                 _buildSearchBar(),
                 Expanded(
-                  child: consignesFiltrees.isEmpty
-                      ? Center(
-                          child: Text(_searchQuery.isNotEmpty
-                              ? "Aucun résultat pour '$_searchQuery'"
-                              : "Aucune consigne archivée pour cette tranche."),
-                        )
+                  child: filteredArchives.isEmpty
+                      ? const Center(child: Text("Aucune archive trouvée."))
                       : ListView.builder(
                           padding: const EdgeInsets.only(bottom: 80),
-                          // Espace pour le FAB
-                          itemCount: consignesFiltrees.length,
+                          itemCount: sortedKeys.length,
                           itemBuilder: (context, index) {
-                            final c = consignesFiltrees[index];
+                            String dateKey = sortedKeys[index];
+                            List<Consigne> dayConsignes =
+                                groupedArchives[dateKey]!;
+
+                            // TRI INTERNE : Du plus vieux au plus récent (par heure)
+                            dayConsignes.sort((a, b) =>
+                                a.dateValidation!.compareTo(b.dateValidation!));
+
                             return Card(
-                                key: ValueKey("archive_${c.id}"),
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                color: Colors.green.shade50,
-                                child: ListTile(
-                                  leading: const Icon(
-                                      Icons.check_circle_outline,
-                                      color: Colors.green),
-                                  title: Text(c.contenu,
-                                      style: const TextStyle(
-                                          decoration:
-                                              TextDecoration.lineThrough)),
-                                  subtitle: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                            "Créée par: ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation})"),
-                                        if (c.categorie != null &&
-                                            c.categorie!.isNotEmpty)
-                                          Text("Catégorie: ${c.categorie}",
-                                              style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: Colors
-                                                      .blueGrey.shade600)),
-                                        if (c.enjeu != null &&
-                                            c.enjeu!.isNotEmpty)
-                                          Padding(
-                                            padding:
-                                                const EdgeInsets.only(top: 2.0),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(Icons.shield_outlined,
-                                                    color: Colors.blue.shade600,
-                                                    size: 12),
-                                                const SizedBox(width: 3),
-                                                Text("Enjeu: ${c.enjeu}",
-                                                    style: TextStyle(
-                                                        fontSize: 11,
-                                                        color: Colors
-                                                            .blue.shade700)),
-                                              ],
-                                            ),
-                                          ),
-                                        if (c.estValidee &&
-                                            c.dateValidation != null)
-                                          Text(
-                                              "Validée le: ${_formatDateSimple(c.dateValidation, showTime: true)}",
-                                              style: const TextStyle(
-                                                  fontSize: 11)),
-
-                                        // --- CORRECTION FINALE APPLIQUÉE À VOTRE MISE EN PAGE ---
-
-                                        // BLOC POUR L'OBSERVATION
-                                        if (c.commentaireValidation != null &&
-                                            c.commentaireValidation!.isNotEmpty)
-                                          Padding(
-                                            padding:
-                                                const EdgeInsets.only(top: 4.0),
-                                            child: Text(
-                                              // Votre format préféré
-                                              "Obs: ${c.commentaireValidation}",
-                                              style: const TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.black54),
-                                              // Permet au texte de passer à la ligne si besoin
-                                              maxLines: 5,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-
-                                        // BLOC POUR LA DOSIMÉTRIE
-                                        if (c.dosimetrieInfo != null &&
-                                            c.dosimetrieInfo!.isNotEmpty)
-                                          Padding(
-                                            padding:
-                                                const EdgeInsets.only(top: 4.0),
-                                            child: Text(
-                                              // Affiche le texte de la dosimétrie tel quel
-                                              c.dosimetrieInfo!,
-                                              style: const TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.black54),
-                                              maxLines: 5,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        // --- FIN DE LA CORRECTION ---
-                                      ]),
-                                  trailing:
-                                      widget.userRoles.contains(roleAdminString)
-                                          ? IconButton(
-                                              icon: Icon(
-                                                  Icons.delete_forever_outlined,
-                                                  color: Colors.red.shade700),
-                                              tooltip:
-                                                  'Supprimer définitivement l\'archive',
-                                              onPressed: () {
-                                                _confirmerEtSupprimerConsigneArchivee(
-                                                    c);
-                                              },
-                                            )
-                                          : null,
-                                ));
+                              margin: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: ExpansionTile(
+                                leading: const Icon(Icons.calendar_today,
+                                    color: Colors.teal),
+                                title: Text(
+                                  _formatDateSimple(
+                                      dayConsignes.first.dateValidation,
+                                      showTime: false),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                subtitle: Text(
+                                    "${dayConsignes.length} consigne(s) validée(s)"),
+                                children: dayConsignes
+                                    .map((c) => _buildArchiveItem(c))
+                                    .toList(),
+                              ),
+                            );
                           },
                         ),
                 ),
               ],
             ),
-            if (consignesFiltrees.isNotEmpty &&
+            // Bouton Excel
+            if (filteredArchives.isNotEmpty &&
                 (widget.userRoles.contains(roleAdminString) ||
                     widget.userRoles.contains(roleChefDeChantierString)))
               Positioned(
                 bottom: 16.0,
                 right: 16.0,
                 child: FloatingActionButton(
-                  heroTag: 'exportExcelButton',
-                  onPressed: () {
-                    Navigator.push(
+                  backgroundColor: Colors.green[700],
+                  onPressed: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => ExcelScreen(
-                          archives: consignesFiltrees,
-                          selectedTranche: widget.selectedTranche ?? 'Inconnue',
-                        ),
-                      ),
-                    );
-                  },
-                  backgroundColor: Colors.green[700],
-                  tooltip: 'Exporter en Excel',
+                          builder: (context) => ExcelScreen(
+                              archives: filteredArchives,
+                              selectedTranche: widget.selectedTranche!))),
                   child: const Icon(Icons.grid_on, color: Colors.white),
                 ),
               ),
           ],
         );
       },
+    );
+  }
+
+  // Widget pour chaque ligne de consigne à l'intérieur du groupe
+  Widget _buildArchiveItem(Consigne c) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        color: Colors.white,
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.access_time, size: 16, color: Colors.grey),
+            Text(
+              "${c.dateValidation!.hour.toString().padLeft(2, '0')}:${c.dateValidation!.minute.toString().padLeft(2, '0')}",
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        title: Text(
+          c.contenu,
+          style: const TextStyle(
+              decoration: TextDecoration.lineThrough, fontSize: 14),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Validé par: ${c.nomPrenomValidation ?? 'Inconnu'}",
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87)),
+              if (c.categorie != null)
+                Text("Catégorie: ${c.categorie}",
+                    style: const TextStyle(fontSize: 11)),
+              if (c.commentaireValidation != null &&
+                  c.commentaireValidation!.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(4)),
+                  child: Text("Obs: ${c.commentaireValidation}",
+                      style: const TextStyle(
+                          fontSize: 11, fontStyle: FontStyle.italic)),
+                ),
+              if (c.dosimetrieInfo != null)
+                Text("Dosimétrie: ${c.dosimetrieInfo}",
+                    style: const TextStyle(fontSize: 11, color: Colors.blue)),
+            ],
+          ),
+        ),
+        trailing: widget.userRoles.contains(roleAdminString)
+            ? IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                onPressed: () => _confirmerEtSupprimerConsigneArchivee(c),
+              )
+            : null,
+      ),
     );
   }
 }

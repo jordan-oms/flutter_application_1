@@ -69,6 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _currentUserNomPrenom = "Chargement...";
   String _roleDisplay = "Chargement...";
   int _currentIndex = 0;
+  int _unreadInfosCount = 0;
 
   String? _selectedTranche;
   String? _favoriteTranche;
@@ -141,6 +142,29 @@ class _HomeScreenState extends State<HomeScreen> {
     _observationValidationDialogController.dispose();
     _obsvalitatiobDialogDosimetrie.dispose();
     super.dispose();
+  }
+
+  void _updateUnreadCount(List<InfoChantier> infos) async {
+    final prefs = await SharedPreferences.getInstance();
+    // On récupère la date stockée (en millisecondes)
+    int? lastCheckMillis = prefs.getInt('last_infos_check_${_selectedTranche}');
+
+    int count = 0;
+    if (lastCheckMillis != null) {
+      DateTime lastCheck = DateTime.fromMillisecondsSinceEpoch(lastCheckMillis);
+      // On compte les infos dont la date d'émission est après la dernière consultation
+      count =
+          infos.where((info) => info.dateEmission.isAfter(lastCheck)).length;
+    } else {
+      // Si c'est la première fois, on considère tout comme lu ou on affiche tout
+      count = infos.length;
+    }
+
+    if (mounted && _unreadInfosCount != count) {
+      setState(() {
+        _unreadInfosCount = count;
+      });
+    }
   }
 
 // Analyse le texte pour trouver un repère et redirige vers le bon écran
@@ -1882,6 +1906,12 @@ class _HomeScreenState extends State<HomeScreen> {
           child: StreamBuilder<List<InfoChantier>>(
             stream: getInfosChantierStream(),
             builder: (context, snapshot) {
+              // --- AJOUT ICI ---
+              if (snapshot.hasData && snapshot.data != null) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _updateUnreadCount(snapshot.data!); // On passe snapshot.data
+                });
+              }
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
                     child: CircularProgressIndicator(
@@ -2199,8 +2229,13 @@ class _HomeScreenState extends State<HomeScreen> {
     List<BottomNavigationBarItem> navBarItems = [
       const BottomNavigationBarItem(
           icon: Icon(Icons.list_alt_outlined), label: 'Consignes'),
-      const BottomNavigationBarItem(
-          icon: Icon(Icons.info_outline), label: 'Infos'),
+      BottomNavigationBarItem(
+          icon: Badge(
+            label: Text(_unreadInfosCount.toString()),
+            isLabelVisible: _unreadInfosCount > 0, // On cache si 0
+            child: const Icon(Icons.info_outline),
+          ),
+          label: 'Infos'),
       const BottomNavigationBarItem(
           icon: Icon(Icons.archive_outlined), label: 'Archives'),
     ];
@@ -2342,12 +2377,23 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) {
+        onTap: (index) async {
           _safelySetState(() {
             _currentIndex = index;
           });
+
+          // SI ON CLIQUE SUR L'ONGLET INFOS (Index 1)
+          if (index == 1 && _selectedTranche != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setInt('last_infos_check_${_selectedTranche}',
+                DateTime.now().millisecondsSinceEpoch);
+            setState(() {
+              _unreadInfosCount = 0;
+            });
+          }
         },
         items: navBarItems,
+        // ...
         selectedItemColor: appBarColor,
         unselectedItemColor: Colors.grey.shade600,
         type: BottomNavigationBarType.fixed,

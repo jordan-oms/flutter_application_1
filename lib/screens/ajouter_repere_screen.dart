@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AjouterRepereScreen extends StatefulWidget {
   const AjouterRepereScreen({super.key});
@@ -101,26 +102,31 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
     super.dispose();
   }
 
-  // --- FONCTION D'IMPORTATION MASSIVE (5000 REPERES) ---
+  // --- FONCTION D'IMPORTATION MASSIVE (OPTIMISÉE WEB & MOBILE) ---
   Future<void> importerMassif() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['csv'],
+        withData: true, // Obligatoire pour lire les bytes sur le Web
       );
 
       if (result == null) return;
 
       setState(() => isLoading = true);
-      final file = File(result.files.single.path!);
-      final input = file.openRead();
 
-      // Transforme le flux CSV en liste de listes
-      final fields = await input
-          .transform(utf8.decoder)
-          .transform(const CsvToListConverter(
-              fieldDelimiter: ';')) // <--- Correction ici
-          .toList();
+      String content;
+      if (kIsWeb) {
+        // Sur le Web, on utilise les bytes directement
+        content = utf8.decode(result.files.single.bytes!);
+      } else {
+        // Sur Mobile/Desktop, on utilise le chemin du fichier
+        final file = File(result.files.single.path!);
+        content = await file.readAsString(encoding: utf8);
+      }
+
+      final fields =
+          const CsvToListConverter(fieldDelimiter: ';').convert(content);
 
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
@@ -129,17 +135,22 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
           .collection('utilisateurs')
           .doc(user.uid)
           .get();
+
       String nomComplet =
           "${userDoc.data()?['prenom'] ?? ""} ${userDoc.data()?['nom'] ?? ""}"
               .trim();
 
+      // Utilisation de WriteBatch pour la performance (limite de 500 par batch)
+      WriteBatch batch = FirebaseFirestore.instance.batch();
       int importCount = 0;
-      // On commence à i=1 pour sauter l'en-tête du tableau
+      int operationCount = 0;
+
       for (var i = 1; i < fields.length; i++) {
         var row = fields[i];
         if (row.length < 5) continue;
 
         String nomRepere = row[0].toString().trim().toUpperCase();
+
         // Validation du format 1ABC123DE
         if (!RegExp(r'^\d[A-Z]{3}\d{3}[A-Z]{2}$').hasMatch(nomRepere)) continue;
 
@@ -147,10 +158,10 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         String typeDetecte =
             (firstDigit != null && firstDigit % 2 == 0) ? "Pair" : "Impair";
 
-        await FirebaseFirestore.instance
-            .collection('reperes')
-            .doc(nomRepere)
-            .set({
+        DocumentReference docRef =
+            FirebaseFirestore.instance.collection('reperes').doc(nomRepere);
+
+        batch.set(docRef, {
           'type': typeDetecte,
           'chantier': row[1].toString(),
           'local': row[2].toString(),
@@ -168,20 +179,35 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
             'date': Timestamp.now()
           }
         });
+
         importCount++;
+        operationCount++;
+
+        // Firebase limite les batches à 500 opérations simultanées
+        if (operationCount == 500) {
+          await batch.commit();
+          batch = FirebaseFirestore.instance.batch();
+          operationCount = 0;
+        }
+      }
+
+      // On envoie le dernier batch s'il reste des éléments
+      if (operationCount > 0) {
+        await batch.commit();
       }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text("$importCount repères importés !"),
+              content: Text("$importCount repères importés avec succès !"),
               backgroundColor: Colors.green),
         );
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("Erreur: $e")));
+      }
     } finally {
       if (mounted) setState(() => isLoading = false);
     }

@@ -161,6 +161,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         final filteredArchives = archivesInitiales.where((c) {
           final q = _searchQuery.toLowerCase();
           return c.contenu.toLowerCase().contains(q) ||
+              (c.auteurNomPrenomCreation
+                  .toLowerCase()
+                  .contains(q)) || // Recherche par auteur
               (c.nomPrenomValidation?.toLowerCase().contains(q) ?? false) ||
               (c.categorie?.toLowerCase().contains(q) ?? false);
         }).toList();
@@ -283,6 +286,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Ligne modifiée pour inclure le créateur (auteur)
+              Text("Créé par: ${c.auteurNomPrenomCreation}",
+                  style: const TextStyle(fontSize: 11, color: Colors.black54)),
               Text("Validé par: ${c.nomPrenomValidation ?? 'Inconnu'}",
                   style: const TextStyle(
                       fontSize: 11,

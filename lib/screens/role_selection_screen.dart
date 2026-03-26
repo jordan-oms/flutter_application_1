@@ -213,7 +213,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                           child: Tooltip(
                             message: 'Authentification requise pour Chantier+',
                             child: Image.asset(
-                              'assets/images/chantier+.png',
+                              'assets/images/KPILog.png',
                               height: 100,
                               errorBuilder: (context, error, stackTrace) {
                                 return const Icon(

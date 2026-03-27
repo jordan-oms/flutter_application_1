@@ -73,7 +73,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         if (item == "Borne à air") {
           algorithmeTypes[item] = "UFS";
         } else if (item == "Nombre de protection biologique") {
-          algorithmeTypes[item] = "standard";
+          algorithmeTypes[item] = "Standard";
         }
       }
     });
@@ -102,35 +102,31 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
     super.dispose();
   }
 
-  // --- FONCTION D'IMPORTATION MASSIVE (OPTIMISÉE WEB & MOBILE) ---
   Future<void> importerMassif() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['csv'],
-        withData: true, // Obligatoire pour lire les bytes sur le Web
+        withData: true,
       );
 
       if (result == null) return;
-
       setState(() => isLoading = true);
 
       String content;
       if (kIsWeb) {
-        // Sur le Web, on utilise les bytes directement
         content = utf8.decode(result.files.single.bytes!);
       } else {
-        // Sur Mobile/Desktop, on utilise le chemin du fichier
         final file = File(result.files.single.path!);
         content = await file.readAsString(encoding: utf8);
       }
 
       final fields =
           const CsvToListConverter(fieldDelimiter: ';').convert(content);
-
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
+      // Récupération des infos utilisateur une seule fois avant la boucle
       final userDoc = await FirebaseFirestore.instance
           .collection('utilisateurs')
           .doc(user.uid)
@@ -139,19 +135,19 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
       String nomComplet =
           "${userDoc.data()?['prenom'] ?? ""} ${userDoc.data()?['nom'] ?? ""}"
               .trim();
+      Timestamp maintenant = Timestamp.now();
 
-      // Utilisation de WriteBatch pour la performance (limite de 500 par batch)
       WriteBatch batch = FirebaseFirestore.instance.batch();
       int importCount = 0;
       int operationCount = 0;
+      int totalRows = fields.length - 1;
 
       for (var i = 1; i < fields.length; i++) {
         var row = fields[i];
         if (row.length < 5) continue;
 
         String nomRepere = row[0].toString().trim().toUpperCase();
-
-        // Validation du format 1ABC123DE
+        // Regex de validation
         if (!RegExp(r'^\d[A-Z]{3}\d{3}[A-Z]{2}$').hasMatch(nomRepere)) continue;
 
         int? firstDigit = int.tryParse(nomRepere[0]);
@@ -171,42 +167,43 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
           'createdBy': {
             'userId': user.uid,
             'nom': nomComplet,
-            'date': Timestamp.now()
+            'date': maintenant
           },
           'lastUpdate': {
             'userId': user.uid,
             'nom': nomComplet,
-            'date': Timestamp.now()
+            'date': maintenant
           }
         });
 
         importCount++;
         operationCount++;
 
-        // Firebase limite les batches à 500 opérations simultanées
+        // Tous les 500 documents (limite max d'un batch Firestore)
         if (operationCount == 500) {
           await batch.commit();
           batch = FirebaseFirestore.instance.batch();
           operationCount = 0;
+
+          // CRUCIAL : Pause pour éviter que le PC ne fige et laisser le réseau respirer
+          await Future.delayed(const Duration(milliseconds: 100));
+          print("Importation en cours : $importCount / $totalRows");
         }
       }
 
-      // On envoie le dernier batch s'il reste des éléments
-      if (operationCount > 0) {
-        await batch.commit();
-      }
+      // Envoi du reliquat
+      if (operationCount > 0) await batch.commit();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text("$importCount repères importés avec succès !"),
-              backgroundColor: Colors.green),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("$importCount repères importés avec succès !"),
+            backgroundColor: Colors.green));
       }
     } catch (e) {
+      print("Erreur Import CSV: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Erreur: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Erreur: $e"), backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => isLoading = false);
@@ -242,7 +239,8 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
               key == "Nombre de protection biologique") {
             materiels[key] = {
               'quantite': val,
-              'type_algo': algorithmeTypes[key] ?? "standard"
+              'type_algo': algorithmeTypes[key] ??
+                  (key == "Borne à air" ? "UFS" : "Standard")
             };
           } else {
             materiels[key] = val;
@@ -294,10 +292,9 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.file_upload),
-            onPressed: isLoading ? null : importerMassif,
-            tooltip: "Import CSV massif",
-          )
+              icon: const Icon(Icons.file_upload),
+              onPressed: isLoading ? null : importerMassif,
+              tooltip: "Import CSV massif")
         ],
       ),
       body: Stack(
@@ -330,12 +327,10 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: TextField(
-                              controller: chantierController,
-                              decoration:
-                                  _inputStyle("NOM DU CHANTIER", "Chantier"),
-                            ),
-                          ),
+                              child: TextField(
+                                  controller: chantierController,
+                                  decoration: _inputStyle(
+                                      "NOM DU CHANTIER", "Chantier"))),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -401,7 +396,24 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
               const SliverToBoxAdapter(child: SizedBox(height: 120)),
             ],
           ),
-          if (isLoading) const Center(child: CircularProgressIndicator()),
+          if (isLoading)
+            Container(
+              color: Colors.black26,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 20),
+                    Text(
+                        "Importation en cours...\nVeuillez ne pas fermer l'application.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ),
           Positioned(
             bottom: 20,
             left: 20,
@@ -425,7 +437,6 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
     );
   }
 
-  // --- LES WIDGETS DE SOUTIEN (REPRIS DE VOTRE CODE) ---
   Widget _buildCompactMediaSection() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 15, 16, 5),
@@ -448,8 +459,10 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
   }
 
   Widget _buildMaterielTile(String nom) {
-    bool custom =
-        nom == "Borne à air" || nom == "Nombre de protection biologique";
+    bool isBorneAAir = nom == "Borne à air";
+    bool isProtectionBio = nom == "Nombre de protection biologique";
+    int quantite = int.tryParse(materielControllers[nom]!.text) ?? 0;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
@@ -464,31 +477,85 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.remove_circle_outline,
-                        color: Colors.red),
-                    onPressed: () => _adjustValue(nom, -1),
-                  ),
-                  Text(
-                    materielControllers[nom]!.text,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                      icon: const Icon(Icons.remove_circle_outline,
+                          color: Colors.red),
+                      onPressed: () => _adjustValue(nom, -1)),
+                  Text(materielControllers[nom]!.text,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                   IconButton(
-                    icon: const Icon(Icons.add_circle_outline,
-                        color: Colors.green),
-                    onPressed: () => _adjustValue(nom, 1),
-                  ),
+                      icon: const Icon(Icons.add_circle_outline,
+                          color: Colors.green),
+                      onPressed: () => _adjustValue(nom, 1)),
                 ],
               ),
             ),
           ),
-          if (custom)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text("Paramètres spécifiques (Optionnel)",
-                  style: TextStyle(fontSize: 10, color: Colors.grey)),
+          if ((isBorneAAir || isProtectionBio) && quantite > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: isProtectionBio
+                  ? _buildProtectionDropdown(nom)
+                  : _buildBorneSelector(nom),
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildProtectionDropdown(String nom) {
+    return DropdownButtonFormField<String>(
+      value: algorithmeTypes[nom],
+      decoration: _dropdownDecoration("Type de protection"),
+      items: const [
+        DropdownMenuItem(
+            value: "Standard",
+            child: Text("Standard", style: TextStyle(fontSize: 13))),
+        DropdownMenuItem(
+            value: "Brique de plombs",
+            child: Text("Brique de plombs", style: TextStyle(fontSize: 13))),
+        DropdownMenuItem(
+            value: "TO/TP",
+            child: Text("TO/TP", style: TextStyle(fontSize: 13))),
+        DropdownMenuItem(
+            value: "Autre",
+            child: Text("Autre", style: TextStyle(fontSize: 13))),
+      ],
+      onChanged: (val) {
+        if (val != null) setState(() => algorithmeTypes[nom] = val);
+      },
+    );
+  }
+
+  Widget _buildBorneSelector(String nom) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("TYPE D'ALGORITHME :",
+            style: TextStyle(
+                fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _choiceChip(nom, "UFS"),
+            const SizedBox(width: 8),
+            _choiceChip(nom, "BFS"),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _choiceChip(String itemKey, String value) {
+    bool isSelected = algorithmeTypes[itemKey] == value;
+    return ChoiceChip(
+      label: Text(value,
+          style: TextStyle(
+              fontSize: 11, color: isSelected ? Colors.white : Colors.black)),
+      selected: isSelected,
+      selectedColor: oMSGreen,
+      onSelected: (bool selected) {
+        if (selected) setState(() => algorithmeTypes[itemKey] = value);
+      },
     );
   }
 
@@ -499,6 +566,22 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         materielControllers[key]!.text = val.toString();
       });
     }
+  }
+
+  InputDecoration _dropdownDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      labelStyle: const TextStyle(
+          fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey.shade300)),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey.shade300)),
+    );
   }
 
   InputDecoration _inputStyle(String label, String hint) {
@@ -522,13 +605,9 @@ class RepereInputFormatter extends TextInputFormatter {
   TextEditingValue formatEditUpdate(
       TextEditingValue oldValue, TextEditingValue newValue) {
     final text = newValue.text.toUpperCase();
-    // Permet la saisie progressive tout en restant en majuscule
     if (text.isEmpty ||
         RegExp(r'^\d?[A-Z]{0,3}\d{0,3}[A-Z]{0,2}$').hasMatch(text)) {
-      return newValue.copyWith(
-        text: text,
-        selection: newValue.selection,
-      );
+      return newValue.copyWith(text: text, selection: newValue.selection);
     }
     return oldValue;
   }

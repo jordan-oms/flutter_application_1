@@ -41,7 +41,8 @@ flutter:
     - assets/images/icon1.png
     - assets/images/chantier+.png
     - assets/images/chantier-.svg
-    - assets/images/KPILog.png
+    - assets/images/CAPILog.png
+    - assets/images/VSP.png
 
 
 flutter_launcher_icons:

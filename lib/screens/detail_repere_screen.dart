@@ -32,7 +32,6 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
   Map<String, String> algorithmeTypes = {};
   Map<String, String> initialAlgoTypes = {};
 
-  // --- NOUVEAU : SIMULATION PHOTOS ---
   List<String> selectedImages = [];
 
   String createdBy = "";
@@ -128,8 +127,9 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                   nom == "Nombre de protection biologique") &&
               mats[nom] is Map) {
             val = mats[nom]['quantite']?.toString() ?? "0";
+            // CORRECTION: On force "Standard" avec Majuscule par défaut
             algoTypes[nom] = mats[nom]['type_algo'] ??
-                (nom == "Borne à air" ? "UFS" : "standard");
+                (nom == "Borne à air" ? "UFS" : "BFS");
           } else {
             val = mats[nom]?.toString() ?? "0";
           }
@@ -166,8 +166,8 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
         if (key == "Borne à air" || key == "Nombre de protection biologique") {
           matsFinal[key] = {
             'quantite': val,
-            'type_algo': algorithmeTypes[key] ??
-                (key == "Borne à air" ? "UFS" : "standard")
+            'type_algo':
+                algorithmeTypes[key] ?? (key == "Borne à air" ? "UFS" : "BFS")
           };
         } else {
           matsFinal[key] = val;
@@ -265,12 +265,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
           : CustomScrollView(
               slivers: [
                 _buildGridHeader(),
-
-                // --- SECTION DOCUMENTATION VISUELLE COMPACTE ---
-                SliverToBoxAdapter(
-                  child: _buildCompactMediaSection(),
-                ),
-
+                SliverToBoxAdapter(child: _buildCompactMediaSection()),
                 ...categories.entries.map((entry) {
                   final itemsToShow = isEditing
                       ? entry.value
@@ -281,21 +276,18 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                                   0) >
                               0)
                           .toList();
-
                   if (itemsToShow.isEmpty)
                     return const SliverToBoxAdapter(child: SizedBox.shrink());
-
                   return SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
                       if (index == 0)
                         return Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 25, 20, 10),
-                          child: Text(entry.key.toUpperCase(),
-                              style: TextStyle(
-                                  color: oMSGreen,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13)),
-                        );
+                            padding: const EdgeInsets.fromLTRB(20, 25, 20, 10),
+                            child: Text(entry.key.toUpperCase(),
+                                style: TextStyle(
+                                    color: oMSGreen,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13)));
                       return _buildMaterielTile(itemsToShow[index - 1]);
                     }, childCount: itemsToShow.length + 1),
                   );
@@ -316,16 +308,14 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
     );
   }
 
-  // --- BARRE DE MÉDIAS COMPACTE ET PROFESSIONNELLE ---
   Widget _buildCompactMediaSection() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 15, 16, 5),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: Colors.grey.shade200)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -340,8 +330,6 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.5)),
               const Spacer(),
-
-              // Bouton d'ajout : Visible uniquement en mode EDITION
               if (isEditing)
                 Material(
                   color: oMSGreen.withOpacity(0.1),
@@ -352,20 +340,17 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                     },
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      child: Row(
-                        children: [
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        child: Row(children: [
                           Icon(Icons.add, size: 14, color: oMSGreen),
                           const SizedBox(width: 4),
                           Text("AJOUTER",
                               style: TextStyle(
                                   color: oMSGreen,
                                   fontSize: 10,
-                                  fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
+                                  fontWeight: FontWeight.bold))
+                        ])),
                   ),
                 ),
             ],
@@ -378,40 +363,32 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                 scrollDirection: Axis.horizontal,
                 itemCount: selectedImages.length,
                 itemBuilder: (context, index) {
-                  return Stack(
-                    children: [
-                      Container(
+                  return Stack(children: [
+                    Container(
                         width: 55,
                         height: 55,
                         margin: const EdgeInsets.only(right: 8),
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.grey.shade300)),
                         child: Icon(Icons.image_outlined,
-                            size: 20, color: Colors.grey.shade400),
-                      ),
-
-                      // Bouton de suppression : Visible uniquement pour l'ADMIN
-                      if (isAdmin)
-                        Positioned(
+                            size: 20, color: Colors.grey.shade400)),
+                    if (isAdmin)
+                      Positioned(
                           top: 0,
                           right: 8,
                           child: GestureDetector(
-                            onTap: () =>
-                                setState(() => selectedImages.removeAt(index)),
-                            child: Container(
-                              decoration: const BoxDecoration(
-                                  color: Colors.red, shape: BoxShape.circle),
-                              padding: const EdgeInsets.all(2),
-                              child: const Icon(Icons.close,
-                                  size: 10, color: Colors.white),
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
+                              onTap: () => setState(
+                                  () => selectedImages.removeAt(index)),
+                              child: Container(
+                                  decoration: const BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle),
+                                  padding: const EdgeInsets.all(2),
+                                  child: const Icon(Icons.close,
+                                      size: 10, color: Colors.white)))),
+                  ]);
                 },
               ),
             ),
@@ -432,9 +409,6 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: (isEditing && (isBorneAAir || isProtectionBio))
-          ? const EdgeInsets.only(bottom: 12)
-          : null,
       decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -467,64 +441,56 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                           _btn(Icons.add, () => _adjustValue(nom, 1),
                               Colors.green[50]!, Colors.green),
                         ]))
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (isBorneAAir || isProtectionBio)
-                        Text("${algorithmeTypes[nom] ?? ''}  ",
-                            style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.blueGrey,
-                                fontWeight: FontWeight.bold)),
-                      Text(materielControllers[nom]?.text ?? "0",
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                              color: oMSGreen)),
-                    ],
-                  ),
+                : Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (isBorneAAir || isProtectionBio)
+                      Text("${algorithmeTypes[nom] ?? ''}  ",
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.blueGrey,
+                              fontWeight: FontWeight.bold)),
+                    Text(materielControllers[nom]?.text ?? "0",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: oMSGreen)),
+                  ]),
           ),
-          if (isEditing && isBorneAAir)
-            _buildTypeSelector(nom, ['UFS', 'BFS', 'Autre']),
-          if (isEditing && isProtectionBio)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: DropdownButtonFormField<String>(
-                value: algorithmeTypes[nom] ?? 'standard',
-                style: const TextStyle(color: Colors.black, fontSize: 13),
-                decoration: InputDecoration(
-                  labelText: "Type de protection",
-                  labelStyle: TextStyle(
-                      color: oMSGreen,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: oMSGreen),
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'standard', child: Text('Standard')),
-                  DropdownMenuItem(value: '1500', child: Text('1500')),
-                  DropdownMenuItem(value: 'TO/TP', child: Text('TO/TP')),
-                  DropdownMenuItem(
-                      value: 'Brique de plombs',
-                      child: Text('Briques de plomb')),
-                  DropdownMenuItem(value: 'Autre', child: Text('Autre')),
-                ],
-                onChanged: (String? newValue) {
-                  if (newValue != null) {
-                    setState(() {
-                      algorithmeTypes[nom] = newValue;
-                    });
-                  }
-                },
-              ),
-            ),
+          // SÉLECTEURS TYPE ALGO EN MODE ÉDITION
+          if (isEditing &&
+              (int.tryParse(materielControllers[nom]!.text) ?? 0) > 0) ...[
+            if (isBorneAAir) _buildTypeSelector(nom, ['UFS', 'BFS']),
+            if (isProtectionBio) _buildProtectionBioDropdown(nom),
+            const SizedBox(height: 10),
+          ]
         ],
+      ),
+    );
+  }
+
+  // --- NOUVEAU DROPDOWN CORRIGÉ POUR PROTECTION BIO ---
+  Widget _buildProtectionBioDropdown(String nom) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: DropdownButtonFormField<String>(
+        value: algorithmeTypes[nom],
+        style: const TextStyle(color: Colors.black, fontSize: 13),
+        decoration: InputDecoration(
+          labelText: "Type de protection",
+          labelStyle: TextStyle(
+              color: oMSGreen, fontWeight: FontWeight.bold, fontSize: 12),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        items: const [
+          DropdownMenuItem(value: 'Standard', child: Text('Standard')),
+          // Majuscule ici !
+          DropdownMenuItem(
+              value: 'Brique de plombs', child: Text('Brique de plombs')),
+          DropdownMenuItem(value: 'TO/TP', child: Text('TO/TP')),
+          DropdownMenuItem(value: 'Autre', child: Text('Autre')),
+        ],
+        onChanged: (val) => setState(() => algorithmeTypes[nom] = val!),
       ),
     );
   }
@@ -547,13 +513,11 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                       label: Text(opt, style: const TextStyle(fontSize: 10))))
                   .toList(),
               selected: {algorithmeTypes[nom] ?? options.first},
-              onSelectionChanged: (newSelection) =>
-                  setState(() => algorithmeTypes[nom] = newSelection.first),
+              onSelectionChanged: (newSel) =>
+                  setState(() => algorithmeTypes[nom] = newSel.first),
               style: SegmentedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                selectedBackgroundColor: oMSGreen,
-                selectedForegroundColor: Colors.black,
-              ),
+                  visualDensity: VisualDensity.compact,
+                  selectedBackgroundColor: oMSGreen),
             ),
           ),
         ],
@@ -561,6 +525,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
     );
   }
 
+  // --- RESTE DU CODE (Header, BTN, Historique, etc.) ---
   Widget _buildGridHeader() {
     String formatDate(Timestamp? ts) =>
         ts == null ? "N/A" : DateFormat('dd/MM/yy à HH:mm').format(ts.toDate());
@@ -572,224 +537,172 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
             borderRadius: const BorderRadius.only(
                 bottomLeft: Radius.circular(30),
                 bottomRight: Radius.circular(30))),
-        child: Column(
-          children: [
-            Row(children: [
-              Expanded(
-                  child: _buildHeaderField(nomController, "REPÈRE",
-                      enabled: false)),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: _buildHeaderField(chantierController, "CHANTIER",
-                      enabled: isEditing)),
-            ]),
-            const SizedBox(height: 12),
-            Row(children: [
-              Expanded(
-                  flex: 2,
-                  child: _buildHeaderField(localController, "LOCAL",
-                      enabled: isEditing && isAdmin)),
-              const SizedBox(width: 8),
-              Expanded(
-                  flex: 1,
-                  child: _buildHeaderNumberField(
-                      diametreController, "DIA.", "DM",
-                      enabled: isEditing && isAdmin)),
-              const SizedBox(width: 8),
-              Expanded(
-                  flex: 1,
-                  child: _buildHeaderNumberField(
-                      metrecubeController, "VOL.", "M3",
-                      enabled: isEditing && isAdmin)),
-            ]),
-            const SizedBox(height: 15),
-            _buildTraceabilityBox(formatDate),
-          ],
-        ),
+        child: Column(children: [
+          Row(children: [
+            Expanded(
+                child:
+                    _buildHeaderField(nomController, "REPÈRE", enabled: false)),
+            const SizedBox(width: 10),
+            Expanded(
+                child: _buildHeaderField(chantierController, "CHANTIER",
+                    enabled: isEditing)),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+                flex: 2,
+                child: _buildHeaderField(localController, "LOCAL",
+                    enabled: isEditing && isAdmin)),
+            const SizedBox(width: 8),
+            Expanded(
+                flex: 1,
+                child: _buildHeaderNumberField(diametreController, "DIA.", "DM",
+                    enabled: isEditing && isAdmin)),
+            const SizedBox(width: 8),
+            Expanded(
+                flex: 1,
+                child: _buildHeaderNumberField(
+                    metrecubeController, "VOL.", "M3",
+                    enabled: isEditing && isAdmin)),
+          ]),
+          const SizedBox(height: 15),
+          _buildTraceabilityBox(formatDate),
+        ]),
       ),
     );
   }
 
-  Widget _buildHeaderField(TextEditingController controller, String label,
-      {bool enabled = true}) {
-    return TextField(
-        controller: controller,
-        enabled: enabled,
-        style: const TextStyle(
-            color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
-        decoration: _inputStyle(label));
-  }
+  Widget _buildHeaderField(TextEditingController c, String l,
+          {bool enabled = true}) =>
+      TextField(
+          controller: c,
+          enabled: enabled,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          decoration: _inputStyle(l));
 
-  Widget _buildHeaderNumberField(
-      TextEditingController controller, String label, String suffix,
-      {required bool enabled}) {
-    return TextField(
-        controller: controller,
-        enabled: enabled,
-        keyboardType: TextInputType.number,
-        style: const TextStyle(
-            color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
-        decoration: _inputStyle(label).copyWith(
-            suffixText: suffix,
-            suffixStyle:
-                const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)));
-  }
+  Widget _buildHeaderNumberField(TextEditingController c, String l, String s,
+          {required bool enabled}) =>
+      TextField(
+          controller: c,
+          enabled: enabled,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          decoration: _inputStyle(l).copyWith(suffixText: s));
 
-  Widget _buildTraceabilityBox(Function formatDate) {
-    return Container(
+  Widget _buildTraceabilityBox(Function formatDate) => Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
           color: Colors.black.withOpacity(0.05),
           borderRadius: BorderRadius.circular(12)),
       child: Column(children: [
         Row(children: [
-          const Icon(Icons.add_circle_outline, color: Colors.black54, size: 14),
+          const Icon(Icons.add_circle_outline, size: 14),
           const SizedBox(width: 6),
           Text("Créé par : $createdBy",
               style:
                   const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
           const Spacer(),
-          Text(formatDate(createdAt),
-              style: const TextStyle(fontSize: 10, color: Colors.black54)),
+          Text(formatDate(createdAt), style: const TextStyle(fontSize: 10))
         ]),
         const SizedBox(height: 4),
         Row(children: [
-          const Icon(Icons.history, color: Colors.black54, size: 14),
+          const Icon(Icons.history, size: 14),
           const SizedBox(width: 6),
           Text("Modifié par : $lastModifiedBy",
               style:
                   const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
           const Spacer(),
-          Text(formatDate(lastModifiedAt),
-              style: const TextStyle(fontSize: 10, color: Colors.black54)),
-        ]),
-      ]),
-    );
-  }
+          Text(formatDate(lastModifiedAt), style: const TextStyle(fontSize: 10))
+        ])
+      ]));
 
-  InputDecoration _inputStyle(String label) {
-    return InputDecoration(
+  InputDecoration _inputStyle(String label) => InputDecoration(
       labelText: label,
       isDense: true,
       labelStyle: const TextStyle(
           color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10),
       filled: true,
       fillColor: Colors.white24,
-      disabledBorder: OutlineInputBorder(
-          borderSide: BorderSide.none, borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-          borderSide: const BorderSide(color: Colors.white24),
-          borderRadius: BorderRadius.circular(12)),
-      focusedBorder: OutlineInputBorder(
-          borderSide: const BorderSide(color: Colors.white),
-          borderRadius: BorderRadius.circular(12)),
-    );
-  }
+      border: OutlineInputBorder(
+          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(12)));
 
-  Widget _btn(IconData icon, VoidCallback onTap, Color bg, Color fg) => InkWell(
-      onTap: onTap,
+  Widget _btn(IconData i, VoidCallback t, Color bg, Color fg) => InkWell(
+      onTap: t,
       child: Container(
           padding: const EdgeInsets.all(4),
           decoration:
               BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
-          child: Icon(icon, size: 18, color: fg)));
+          child: Icon(i, size: 18, color: fg)));
 
   void _showHistory() {
     showModalBottomSheet(
         context: context,
         isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
         builder: (context) => DraggableScrollableSheet(
-              initialChildSize: 0.75,
-              expand: false,
-              builder: (context, scrollController) => Column(children: [
-                const SizedBox(height: 20),
-                const Text("Historique des modifications",
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                Expanded(
-                    child: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('reperes')
-                      .doc(widget.repereId)
-                      .collection('modifications')
-                      .orderBy('date', descending: true)
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData)
-                      return const Center(child: CircularProgressIndicator());
-                    final docs = snapshot.data!.docs;
-                    return ListView.builder(
-                        controller: scrollController,
-                        itemCount: docs.length,
-                        itemBuilder: (context, index) {
-                          var data = docs[index].data() as Map<String, dynamic>;
-                          return ExpansionTile(
-                            title: Text(data['updatedBy'],
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                            subtitle: Text(DateFormat('dd/MM/yyyy HH:mm')
-                                .format((data['date'] as Timestamp).toDate())),
+            expand: false,
+            builder: (context, sc) => StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('reperes')
+                    .doc(widget.repereId)
+                    .collection('modifications')
+                    .orderBy('date', descending: true)
+                    .snapshots(),
+                builder: (context, snap) {
+                  if (!snap.hasData)
+                    return const Center(child: CircularProgressIndicator());
+                  final docs = snap.data!.docs;
+                  return ListView.builder(
+                      controller: sc,
+                      itemCount: docs.length,
+                      itemBuilder: (context, i) {
+                        var d = docs[i].data() as Map<String, dynamic>;
+                        return ExpansionTile(
+                            title: Text(d['updatedBy']),
+                            subtitle: Text(DateFormat('dd/MM/yy HH:mm')
+                                .format((d['date'] as Timestamp).toDate())),
                             children: [
                               Container(
-                                  padding: const EdgeInsets.all(15),
-                                  color: Colors.grey[50],
+                                  padding: const EdgeInsets.all(10),
                                   child: Column(
-                                      children: (data['materiels'] as Map)
+                                      children: (d['materiels'] as Map)
                                           .entries
-                                          .map((e) {
-                                    final val = e.value is Map
-                                        ? e.value['quantite']
-                                        : e.value;
-                                    final type = e.value is Map
-                                        ? " (${e.value['type_algo']})"
-                                        : "";
-                                    return Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text("${e.key}$type"),
-                                          Text(val.toString(),
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.bold)),
-                                        ]);
-                                  }).toList()))
-                            ],
-                          );
-                        });
-                  },
-                ))
-              ]),
-            ));
+                                          .map((e) => Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment
+                                                          .spaceBetween,
+                                                  children: [
+                                                    Text(
+                                                        "${e.key}${e.value is Map ? ' (${e.value['type_algo']})' : ''}"),
+                                                    Text((e.value is Map
+                                                            ? e.value[
+                                                                'quantite']
+                                                            : e.value)
+                                                        .toString())
+                                                  ]))
+                                          .toList()))
+                            ]);
+                      });
+                })));
   }
 
   Future<void> _deleteRepere() async {
-    bool confirm = await showDialog(
+    bool? confirm = await showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-              title: const Text("Supprimer ?"),
-              content: const Text(
-                  "Voulez-vous supprimer ce repère et tout son historique ?"),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text("ANNULER")),
-                ElevatedButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    style:
-                        ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                    child: const Text("SUPPRIMER",
-                        style: TextStyle(color: Colors.white))),
-              ],
-            ));
+        builder: (c) => AlertDialog(title: const Text("Supprimer ?"), actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  child: const Text("NON")),
+              TextButton(
+                  onPressed: () => Navigator.pop(c, true),
+                  child: const Text("OUI"))
+            ]));
     if (confirm == true) {
       await FirebaseFirestore.instance
           .collection('reperes')
           .doc(widget.repereId)
           .delete();
-      if (mounted) Navigator.pop(context);
+      Navigator.pop(context);
     }
   }
 
@@ -800,20 +713,17 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
         .collection('reperes')
         .doc(widget.repereId)
         .get();
-    final data = doc.data();
-    if (data != null && data['lastUpdate'] != null) {
-      Timestamp lastUpdate = data['lastUpdate']['date'];
-      final readDoc = await FirebaseFirestore.instance
+    if (doc.exists && doc.data()?['lastUpdate'] != null) {
+      Timestamp last = doc.data()!['lastUpdate']['date'];
+      final read = await FirebaseFirestore.instance
           .collection('reperes')
           .doc(widget.repereId)
           .collection('lectures')
           .doc(user.uid)
           .get();
-      if (!readDoc.exists ||
-          lastUpdate.seconds >
-              (readDoc.data()?['lastRead'] as Timestamp).seconds) {
+      if (!read.exists ||
+          last.seconds > (read.data()?['lastRead'] as Timestamp).seconds)
         setState(() => hasNewNotifications = true);
-      }
     }
   }
 

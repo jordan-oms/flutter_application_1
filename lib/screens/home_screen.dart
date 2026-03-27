@@ -1597,7 +1597,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         if (peutModifierConsigne && !c.estValidee)
                           IconButton(
-                            icon: const Icon(Icons.edit, size: 20),
+                            icon: const Icon(
+                              Icons.edit,
+                              size: 20,
+                              color: Colors.blue, // Couleur bleue
+                            ),
                             tooltip: "Modifier",
                             padding: EdgeInsets.zero,
                             visualDensity: VisualDensity.compact,
@@ -1605,7 +1609,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         if (peutAgirSurConsigne && !c.estValidee)
                           IconButton(
-                            icon: const Icon(Icons.gps_fixed, size: 20),
+                            icon: const Icon(
+                              Icons.gps_fixed,
+                              size: 20,
+                              color: Color(0xFF92C022), // Couleur personnalisée
+                            ),
                             tooltip: "Localiser",
                             padding: EdgeInsets.zero,
                             visualDensity: VisualDensity.compact,
@@ -1614,7 +1622,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         if (peutSupprimerConsigneNonValidee && !c.estValidee)
                           IconButton(
-                            icon: const Icon(Icons.delete, size: 20),
+                            icon: const Icon(
+                              Icons.delete,
+                              size: 20,
+                              color: Colors.red, // Couleur rouge
+                            ),
                             tooltip: "Supprimer",
                             padding: EdgeInsets.zero,
                             visualDensity: VisualDensity.compact,

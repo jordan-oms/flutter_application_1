@@ -211,14 +211,14 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                             }
                           },
                           child: Tooltip(
-                            message: 'Authentification requise pour Chantier+',
+                            message: 'Authentification requise pour CAPILog',
                             child: Image.asset(
-                              'assets/images/KPILog.png',
-                              height: 100,
+                              'assets/images/CAPILog.png',
+                              height: 120,
                               errorBuilder: (context, error, stackTrace) {
                                 return const Icon(
                                   Icons.add_business_outlined,
-                                  size: 100,
+                                  size: 120,
                                   color: Colors.blueGrey,
                                 );
                               },
@@ -232,7 +232,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                         GestureDetector(
                           onTap: _startLoginProcess, // Déclenche la connexion
                           child: Tooltip(
-                            message: 'Accéder à l\'application',
+                            message: 'Authentification requise pour Consignes',
                             child: Image.asset(
                               'assets/images/icon1.png',
                               height: 100,

@@ -63,10 +63,30 @@ class _GererLesUtilisateursScreenState extends State<GererLesUtilisateursScreen>
   }
 }
 
-class UserListView extends StatelessWidget {
+class UserListView extends StatefulWidget {
   final String statut;
 
   const UserListView({Key? key, required this.statut}) : super(key: key);
+
+  @override
+  State<UserListView> createState() => _UserListViewState();
+}
+
+class _UserListViewState extends State<UserListView> {
+  final TextEditingController _searchController = TextEditingController();
+  String? _selectedFilterRole;
+  final List<String> _roles = const [
+    'chef_de_chantier',
+    'administrateur',
+    'chef_equipe',
+    'intervenant',
+  ];
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   CollectionReference get _collection =>
       FirebaseFirestore.instance.collection('utilisateurs');
@@ -139,49 +159,159 @@ class UserListView extends StatelessWidget {
     );
   }
 
+  String _displayRole(String role) {
+    return role.replaceAll('_', ' ').replaceFirstMapped(
+          RegExp(r'\b\w'),
+          (match) => match.group(0)!.toUpperCase(),
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _collection.where('statut', isEqualTo: statut).snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const Center(child: Text('Erreur de chargement'));
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Text(
-              statut == 'en_attente'
-                  ? "Aucun utilisateur à valider"
-                  : "Aucun utilisateur actif",
+    return Column(
+      children: [
+        // Barre de recherche
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              labelText: 'Rechercher par nom ou prénom',
+              prefixIcon: const Icon(Icons.search),
+              border: const OutlineInputBorder(),
             ),
-          );
-        }
+            onChanged: (value) => setState(() {}),
+          ),
+        ),
+        // Filtre par rôle, seulement pour les utilisateurs actifs
+        if (widget.statut == 'valide')
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: DropdownButtonFormField<String>(
+              value: _selectedFilterRole,
+              decoration: const InputDecoration(
+                labelText: 'Filtrer par rôle',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('Tous les rôles'),
+                ),
+                ..._roles.map((r) => DropdownMenuItem<String>(
+                      value: r,
+                      child: Text(_displayRole(r)),
+                    )),
+              ],
+              onChanged: (val) => setState(() => _selectedFilterRole = val),
+            ),
+          ),
+        // Liste
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: _collection
+                .where('statut', isEqualTo: widget.statut)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Center(child: Text('Erreur de chargement'));
+              }
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return Center(
+                  child: Text(
+                    widget.statut == 'en_attente'
+                        ? "Aucun utilisateur à valider"
+                        : "Aucun utilisateur actif",
+                  ),
+                );
+              }
 
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
-          children: snapshot.data!.docs.map((doc) {
-            if (doc.id == FirebaseAuth.instance.currentUser?.uid) {
-              return const SizedBox.shrink(); // Ne pas s'afficher soi-même
-            }
-            if (statut == 'valide') {
-              // On utilise la nouvelle carte simplifiée
-              return ActiveUserCard(
-                userDocument: doc,
-                onUpdate: (uid, data) => _updateUser(context, uid, data),
-                onDelete: (uid) => _deleteUser(context, uid),
+              // Filtrer et trier
+              List<DocumentSnapshot> filteredDocs =
+                  snapshot.data!.docs.where((doc) {
+                if (doc.id == FirebaseAuth.instance.currentUser?.uid) {
+                  return false; // Ne pas s'afficher soi-même
+                }
+                final data = doc.data() as Map<String, dynamic>? ?? {};
+                final nom = data['nom']?.toString() ?? '';
+                final prenom = data['prenom']?.toString() ?? '';
+                final email = data['email']?.toString() ?? '';
+                final String displayName = (nom.isNotEmpty && prenom.isNotEmpty)
+                    ? '$prenom $nom'
+                    : email;
+
+                // Recherche
+                if (_searchController.text.isNotEmpty &&
+                    !displayName
+                        .toLowerCase()
+                        .contains(_searchController.text.toLowerCase()) &&
+                    !email
+                        .toLowerCase()
+                        .contains(_searchController.text.toLowerCase())) {
+                  return false;
+                }
+
+                // Filtre par rôle
+                if (_selectedFilterRole != null) {
+                  final rolesList = List<String>.from(data['roles'] ?? []);
+                  if (!rolesList.contains(_selectedFilterRole)) {
+                    return false;
+                  }
+                }
+
+                return true;
+              }).toList();
+
+              // Trier par ordre alphabétique
+              filteredDocs.sort((a, b) {
+                final dataA = a.data() as Map<String, dynamic>? ?? {};
+                final nomA = dataA['nom']?.toString() ?? '';
+                final prenomA = dataA['prenom']?.toString() ?? '';
+                final emailA = dataA['email']?.toString() ?? '';
+                final String displayNameA =
+                    (nomA.isNotEmpty && prenomA.isNotEmpty)
+                        ? '$prenomA $nomA'
+                        : emailA;
+
+                final dataB = b.data() as Map<String, dynamic>? ?? {};
+                final nomB = dataB['nom']?.toString() ?? '';
+                final prenomB = dataB['prenom']?.toString() ?? '';
+                final emailB = dataB['email']?.toString() ?? '';
+                final String displayNameB =
+                    (nomB.isNotEmpty && prenomB.isNotEmpty)
+                        ? '$prenomB $nomB'
+                        : emailB;
+
+                return displayNameA
+                    .toLowerCase()
+                    .compareTo(displayNameB.toLowerCase());
+              });
+
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
+                children: filteredDocs.map((doc) {
+                  if (widget.statut == 'valide') {
+                    return ActiveUserCard(
+                      userDocument: doc,
+                      onUpdate: (uid, data) => _updateUser(context, uid, data),
+                      onDelete: (uid) => _deleteUser(context, uid),
+                    );
+                  } else {
+                    return UserValidationCard(
+                      userDocument: doc,
+                      onValidate: (uid, data) =>
+                          _updateUser(context, uid, data),
+                    );
+                  }
+                }).toList(),
               );
-            } else {
-              return UserValidationCard(
-                userDocument: doc,
-                onValidate: (uid, data) => _updateUser(context, uid, data),
-              );
-            }
-          }).toList(),
-        );
-      },
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -212,6 +342,13 @@ class _ActiveUserCardState extends State<ActiveUserCard> {
     'intervenant',
   ];
 
+  final Map<String, Color> _roleColors = const {
+    'administrateur': Colors.red,
+    'chef_de_chantier': Colors.blue,
+    'chef_equipe': Colors.green,
+    'intervenant': Colors.orange,
+  };
+
   @override
   void initState() {
     super.initState();
@@ -237,6 +374,8 @@ class _ActiveUserCardState extends State<ActiveUserCard> {
     String displayName =
         (nom != null && prenom != null) ? '$prenom $nom' : email;
 
+    final Color roleColor = _roleColors[_selectedRole] ?? Colors.grey;
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 4.0),
       child: ExpansionTile(
@@ -244,7 +383,7 @@ class _ActiveUserCardState extends State<ActiveUserCard> {
           _selectedRole == 'administrateur'
               ? Icons.shield_outlined
               : Icons.engineering,
-          color: Colors.blueGrey,
+          color: roleColor,
         ),
         title: Text(displayName),
         subtitle: Text(

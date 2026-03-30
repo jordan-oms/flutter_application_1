@@ -37,6 +37,46 @@ const List<String> optionsEnjeux = [
   'Sécurité',
 ];
 
+// Classe pour comparer les listes de consignes et éviter les reconstructions inutiles
+class _ConsignesCache {
+  List<Consigne>? _lastList;
+
+  bool hasChanged(List<Consigne> newList) {
+    if (_lastList == null) {
+      _lastList = newList;
+      return true;
+    }
+
+    // Comparaison rapide par longueur
+    if (_lastList!.length != newList.length) {
+      _lastList = newList;
+      return true;
+    }
+
+    // Comparaison par ID et propriétés clés
+    for (int i = 0; i < _lastList!.length; i++) {
+      final oldC = _lastList![i];
+      final newC = newList[i];
+
+      if (oldC.id != newC.id ||
+          oldC.estValidee != newC.estValidee ||
+          oldC.contenu != newC.contenu ||
+          oldC.commentairesNonRealisation?.length !=
+              newC.commentairesNonRealisation?.length ||
+          oldC.dosimetrieInfo != newC.dosimetrieInfo) {
+        _lastList = newList;
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  void clear() {
+    _lastList = null;
+  }
+}
+
 enum HomeScreenLoadingState {
   initializing,
   loadingTranches,
@@ -70,6 +110,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String _roleDisplay = "Chargement...";
   int _currentIndex = 0;
   int _unreadInfosCount = 0;
+  late ValueNotifier<int> _unreadCountNotifier;
+
+  // Cache pour éviter les reconstructions inutiles
+  final _ConsignesCache _consignesCache = _ConsignesCache();
 
   String? _selectedTranche;
   String? _favoriteTranche;
@@ -93,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
       FirebaseFirestore.instance.collection('consignes');
   final Map<String, TextEditingController> _obsNonRealiseeControllers = {};
   final Map<String, TextEditingController> _obsValidationControllers = {};
+  List<Consigne> _lastConsignesSnapshot = [];
   final List<String> _categoriesConsignes = [
     "Confinement",
     "Protection Biologique",
@@ -117,6 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _unreadCountNotifier = ValueNotifier<int>(0);
     // Si on est en lecture seule, on ne charge que les tranches.
     if (_isReadOnly) {
       _safelySetState(
@@ -141,6 +187,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _obsValidationControllers.clear();
     _observationValidationDialogController.dispose();
     _obsvalitatiobDialogDosimetrie.dispose();
+    _unreadCountNotifier.dispose();
     super.dispose();
   }
 
@@ -648,8 +695,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     _observationValidationDialogController.text.trim();
                 String commentaireAvecAuteur = "";
                 if (observationTexte.isNotEmpty) {
-                  commentaireAvecAuteur =
-                      "$observationTexte\n- $_currentUserNomPrenom ($_roleDisplay) le ${_formatDateSimple(DateTime.now(), showTime: true)}";
+                  commentaireAvecAuteur = "$observationTexte";
                 }
                 Navigator.of(dialogContext).pop();
                 _observationValidationDialogController.clear();
@@ -1387,6 +1433,20 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    // Initialiser les contrôleurs pour TOUTES les consignes d'abord
+    for (final c in consignes) {
+      _obsNonRealiseeControllers.putIfAbsent(
+        c.id,
+        () => TextEditingController(),
+      );
+      _obsValidationControllers.putIfAbsent(
+        c.id,
+        () => TextEditingController(
+          text: c.commentaireValidation?.split('\n-').first.trim() ?? "",
+        ),
+      );
+    }
+
     final bool peutAgirSurConsigne = (_userRoles.contains(roleAdminString) ||
             _userRoles.contains(roleChefDeChantierString) ||
             _userRoles.contains(roleChefEquipeString) ||
@@ -1402,448 +1462,36 @@ class _HomeScreenState extends State<HomeScreen> {
                 _userRoles.contains(roleChefDeChantierString)) &&
             _currentUser != null;
 
-    return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 120),
-      itemCount: consignes.length,
-      itemBuilder: (context, index) {
-        final c = consignes[index];
+    return RepaintBoundary(
+      child: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 120),
+        itemCount: consignes.length,
+        itemBuilder: (context, index) {
+          final c = consignes[index];
 
-        _obsNonRealiseeControllers.putIfAbsent(
-          c.id,
-          () => TextEditingController(),
-        );
-        _obsValidationControllers.putIfAbsent(
-          c.id,
-          () => TextEditingController(
-            text: c.commentaireValidation?.split('\n-').first.trim() ?? "",
-          ),
-        );
-
-        final bool estPrioritaireActive = c.estPrioritaire && !c.estValidee;
-
-        return Card(
-          key: ValueKey(c.id),
-          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          color: estPrioritaireActive
-              ? Colors.red.shade50
-              : (c.estValidee ? Colors.green.shade50 : Colors.white),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: BorderSide(
-              color: estPrioritaireActive
-                  ? Colors.red.shade300
-                  : Colors.grey.shade200,
-            ),
-          ),
-          elevation: 1.5,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // LIGNE PRINCIPALE
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Checkbox / statut
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: peutAgirSurConsigne
-                          ? Checkbox(
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              visualDensity: VisualDensity.compact,
-                              value: c.estValidee,
-                              onChanged: (val) {
-                                if (val != null) {
-                                  _presenterValidationConsigne(c, val);
-                                }
-                              },
-                            )
-                          : Icon(
-                              c.estValidee
-                                  ? Icons.check_circle
-                                  : Icons.radio_button_unchecked,
-                              color: c.estValidee ? Colors.green : Colors.grey,
-                              size: 22,
-                            ),
-                    ),
-
-                    const SizedBox(width: 8),
-
-                    // TEXTE PRINCIPAL
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Titre + éventuel badge PRIORITAIRE sur la même ligne
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  c.contenu,
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    height: 1.2,
-                                    fontWeight: estPrioritaireActive
-                                        ? FontWeight.w600
-                                        : FontWeight.w500,
-                                    color: estPrioritaireActive
-                                        ? Colors.red.shade800
-                                        : (c.estValidee
-                                            ? Colors.grey.shade700
-                                            : Colors.black87),
-                                    decoration: c.estValidee
-                                        ? TextDecoration.lineThrough
-                                        : null,
-                                  ),
-                                ),
-                              ),
-                              if (estPrioritaireActive) ...[
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.shade100,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    "PRIORITAIRE",
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.red.shade800,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-
-                          const SizedBox(height: 4),
-
-                          // Ligne méta (auteur + date)
-                          Text(
-                            "Créée par ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${_formatDateSimple(c.dateEmission)}",
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade600,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-
-                          const SizedBox(height: 4),
-
-                          // Ligne chips (catégorie + enjeu) sur une seule ligne quand possible
-                          if ((c.categorie != null &&
-                                  c.categorie!.isNotEmpty) ||
-                              (c.enjeu != null && c.enjeu!.isNotEmpty))
-                            Wrap(
-                              spacing: 4,
-                              runSpacing: -4,
-                              children: [
-                                if (c.categorie != null &&
-                                    c.categorie!.isNotEmpty)
-                                  Chip(
-                                    label: Text(c.categorie!),
-                                    backgroundColor: Colors.blueGrey.shade50,
-                                    labelStyle: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.blueGrey.shade800,
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 0,
-                                    ),
-                                    visualDensity: VisualDensity.compact,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                if (c.enjeu != null && c.enjeu!.isNotEmpty)
-                                  Chip(
-                                    avatar: const Icon(
-                                      Icons.shield_outlined,
-                                      size: 13,
-                                    ),
-                                    label: Text(c.enjeu!),
-                                    backgroundColor: Colors.blue.shade50,
-                                    labelStyle: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.blue.shade900,
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 0,
-                                    ),
-                                    visualDensity: VisualDensity.compact,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                              ],
-                            ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(width: 4),
-
-                    // ACTIONS
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (peutModifierConsigne && !c.estValidee)
-                          IconButton(
-                            icon: const Icon(
-                              Icons.edit,
-                              size: 20,
-                              color: Colors.blue, // Couleur bleue
-                            ),
-                            tooltip: "Modifier",
-                            padding: EdgeInsets.zero,
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () => _presenterModificationConsigne(c),
-                          ),
-                        if (peutAgirSurConsigne && !c.estValidee)
-                          IconButton(
-                            icon: const Icon(
-                              Icons.gps_fixed,
-                              size: 20,
-                              color: Color(0xFF92C022), // Couleur personnalisée
-                            ),
-                            tooltip: "Localiser",
-                            padding: EdgeInsets.zero,
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () =>
-                                _analyserEtNaviguerVersRepere(c.contenu),
-                          ),
-                        if (peutSupprimerConsigneNonValidee && !c.estValidee)
-                          IconButton(
-                            icon: const Icon(
-                              Icons.delete,
-                              size: 20,
-                              color: Colors.red, // Couleur rouge
-                            ),
-                            tooltip: "Supprimer",
-                            padding: EdgeInsets.zero,
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () => _confirmerSuppressionConsigne(c),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 8),
-
-                // OBSERVATION NON REALISATION (champ visible)
-                if (!c.estValidee && peutAgirSurConsigne)
-                  _buildChampObservation(
-                    context: context,
-                    consigne: c,
-                    controller: _obsNonRealiseeControllers[c.id]!,
-                    label: "Observation (si non réalisée)",
-                    hint: "Raison de la non réalisation...",
-                    onSave: (texte) {
-                      _enregistrerObservationNonRealisation(c, texte);
-                    },
-                    backgroundColor: Colors.orange.shade50,
-                    iconColor: Colors.orange.shade800,
-                  ),
-
-                // HISTORIQUE DES OBSERVATIONS NON REALISEES (déroulant)
-                if (c.commentairesNonRealisation != null &&
-                    c.commentairesNonRealisation!.isNotEmpty)
-                  _buildChampObservationDeroulant(
-                    context: context,
-                    commentaires: c.commentairesNonRealisation!,
-                    label: "Observations précédentes",
-                    backgroundColor: Colors.orange.shade100,
-                    iconColor: Colors.orange.shade800,
-                  ),
-
-                // OBSERVATION VALIDATION (champ visible)
-                if (c.estValidee && peutAgirSurConsigne)
-                  _buildChampObservation(
-                    context: context,
-                    consigne: c,
-                    controller: _obsValidationControllers[c.id]!,
-                    label: "Observation après validation",
-                    hint: "Ajouter un commentaire...",
-                    onSave: (texte) {
-                      _enregistrerObservationValidation(c, texte);
-                    },
-                    backgroundColor: Colors.green.shade50,
-                    iconColor: Colors.green.shade800,
-                  ),
-
-                // DOSIMETRIE
-                if (c.dosimetrieInfo != null && c.dosimetrieInfo!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        "Dosimétrie : ${c.dosimetrieInfo!}",
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue.shade900,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildChampObservationDeroulant({
-    required BuildContext context,
-    required List<Commentaire> commentaires,
-    required String label,
-    required Color backgroundColor,
-    required Color iconColor,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(top: 6),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: iconColor.withOpacity(0.4)),
-      ),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 10),
-        collapsedIconColor: iconColor,
-        iconColor: iconColor,
-        childrenPadding: const EdgeInsets.only(bottom: 6),
-        title: Row(
-          children: [
-            Icon(Icons.comment_outlined, color: iconColor, size: 18),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: iconColor,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-        children: commentaires.map((commentaire) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(10, 4, 10, 2),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: backgroundColor.withOpacity(0.55),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                "${commentaire.texte}\n- ${commentaire.auteurNomPrenom} le ${_formatDateSimple(commentaire.date, showTime: true)}",
-                style: TextStyle(fontSize: 11.5, color: iconColor),
-              ),
-            ),
+          return ConsigneItemWidget(
+            key: ValueKey(c.id),
+            consigne: c,
+            peutAgirSurConsigne: peutAgirSurConsigne,
+            peutModifierConsigne: peutModifierConsigne,
+            peutSupprimerConsigneNonValidee: peutSupprimerConsigneNonValidee,
+            obsNonRealiseeController: _obsNonRealiseeControllers[c.id]!,
+            obsValidationController: _obsValidationControllers[c.id]!,
+            onValidation: _presenterValidationConsigne,
+            onModification: _presenterModificationConsigne,
+            onLocaliser: _analyserEtNaviguerVersRepere,
+            onSuppression: _confirmerSuppressionConsigne,
+            onEnregistrerObsNonRealisation:
+                _enregistrerObservationNonRealisation,
+            onEnregistrerObsValidation: _enregistrerObservationValidation,
+            formatDate: _formatDateSimple,
           );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildChampObservation({
-    required BuildContext context,
-    required Consigne consigne,
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required Function(String) onSave,
-    Color backgroundColor = Colors.white,
-    Color iconColor = Colors.grey,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 3),
-          TextField(
-            controller: controller,
-            maxLines: null,
-            minLines: 1,
-            textInputAction: TextInputAction.done,
-            decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade500,
-              ),
-              filled: true,
-              fillColor: backgroundColor,
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6.0),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6.0),
-                borderSide: BorderSide(color: Colors.grey.shade400),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6.0),
-                borderSide: BorderSide(
-                    color: Theme.of(context).primaryColor, width: 1.4),
-              ),
-              suffixIconConstraints:
-                  const BoxConstraints(minHeight: 32, minWidth: 32),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  Icons.save_alt_outlined,
-                  color: iconColor,
-                  size: 19,
-                ),
-                tooltip: "Enregistrer l'observation",
-                padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.compact,
-                onPressed: () {
-                  onSave(controller.text.trim());
-                  FocusScope.of(context).unfocus();
-                },
-              ),
-            ),
-            onSubmitted: (text) {
-              onSave(text.trim());
-            },
-          ),
-        ],
+        },
       ),
     );
   }
 
   Widget _buildConsignesBlocWidget() {
-    // ... (Cette fonction reste la même)
     if (_selectedTranche == null) {
       return Center(
         child: Padding(
@@ -1863,26 +1511,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildBlocHeader("Consignes - $_selectedTranche",
             headerColor: Colors.green),
         Expanded(
-          child: StreamBuilder<List<Consigne>>(
-            stream: getConsignesStream(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Erreur: ${snapshot.error}'));
-              }
-              final toutesLesConsignes = snapshot.data ?? [];
-              final consignesActives = toutesLesConsignes
-                  .where((consigne) => !consigne.estValidee)
-                  .toList();
-              if (consignesActives.isEmpty) {
-                return const Center(
-                  child: Text("Aucune consigne active pour cette tranche."),
-                );
-              }
-              return _buildConsignesList(consignesActives);
-            },
+          child: _ConsignesStreamBuilder(
+            selectedTranche: _selectedTranche!,
+            getConsignesStream: getConsignesStream,
+            buildConsignesList: _buildConsignesList,
+            cache: _consignesCache,
           ),
         ),
         _buildChampAjoutConsigne(),
@@ -2411,6 +2044,536 @@ class _HomeScreenState extends State<HomeScreen> {
         type: BottomNavigationBarType.fixed,
         showUnselectedLabels: true,
       ),
+    );
+  }
+}
+
+class ConsigneItemWidget extends StatefulWidget {
+  final Consigne consigne;
+  final bool peutAgirSurConsigne;
+  final bool peutModifierConsigne;
+  final bool peutSupprimerConsigneNonValidee;
+  final TextEditingController obsNonRealiseeController;
+  final TextEditingController obsValidationController;
+  final Function(Consigne, bool) onValidation;
+  final Function(Consigne) onModification;
+  final Function(String) onLocaliser;
+  final Function(Consigne) onSuppression;
+  final Function(Consigne, String) onEnregistrerObsNonRealisation;
+  final Function(Consigne, String) onEnregistrerObsValidation;
+  final String Function(DateTime) formatDate;
+
+  const ConsigneItemWidget({
+    Key? key,
+    required this.consigne,
+    required this.peutAgirSurConsigne,
+    required this.peutModifierConsigne,
+    required this.peutSupprimerConsigneNonValidee,
+    required this.obsNonRealiseeController,
+    required this.obsValidationController,
+    required this.onValidation,
+    required this.onModification,
+    required this.onLocaliser,
+    required this.onSuppression,
+    required this.onEnregistrerObsNonRealisation,
+    required this.onEnregistrerObsValidation,
+    required this.formatDate,
+  }) : super(key: key);
+
+  @override
+  State<ConsigneItemWidget> createState() => _ConsigneItemWidgetState();
+}
+
+class _ConsigneItemWidgetState extends State<ConsigneItemWidget>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final c = widget.consigne;
+    final estPrioritaireActive = c.estPrioritaire && !c.estValidee;
+
+    return Card(
+      key: ValueKey(c.id),
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      color: estPrioritaireActive
+          ? Colors.red.shade50
+          : (c.estValidee ? Colors.green.shade50 : Colors.white),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color:
+              estPrioritaireActive ? Colors.red.shade300 : Colors.grey.shade200,
+        ),
+      ),
+      elevation: 1.0,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // LIGNE PRINCIPALE
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Checkbox / statut
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: widget.peutAgirSurConsigne
+                      ? Checkbox(
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                          value: c.estValidee,
+                          onChanged: (val) {
+                            if (val != null) {
+                              widget.onValidation(c, val);
+                            }
+                          },
+                        )
+                      : Icon(
+                          c.estValidee
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: c.estValidee ? Colors.green : Colors.grey,
+                          size: 20,
+                        ),
+                ),
+
+                const SizedBox(width: 6),
+
+                // TEXTE PRINCIPAL
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Titre + éventuel badge PRIORITAIRE sur la même ligne
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              c.contenu,
+                              style: TextStyle(
+                                fontSize: 14,
+                                height: 1.2,
+                                fontWeight: estPrioritaireActive
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                                color: estPrioritaireActive
+                                    ? Colors.red.shade800
+                                    : (c.estValidee
+                                        ? Colors.grey.shade700
+                                        : Colors.black87),
+                                decoration: c.estValidee
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          if (estPrioritaireActive) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade100,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                "PRIORITAIRE",
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+
+                      const SizedBox(height: 2),
+
+                      // Ligne méta (auteur + date)
+                      Text(
+                        "Créée par ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${widget.formatDate(c.dateEmission)}",
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade600,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+
+                      const SizedBox(height: 2),
+
+                      // Ligne chips (catégorie + enjeu) sur une seule ligne quand possible
+                      if ((c.categorie != null && c.categorie!.isNotEmpty) ||
+                          (c.enjeu != null && c.enjeu!.isNotEmpty))
+                        Wrap(
+                          spacing: 3,
+                          runSpacing: -2,
+                          children: [
+                            if (c.categorie != null && c.categorie!.isNotEmpty)
+                              Chip(
+                                label: Text(c.categorie!),
+                                backgroundColor: Colors.blueGrey.shade50,
+                                labelStyle: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.blueGrey.shade800,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 0,
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            if (c.enjeu != null && c.enjeu!.isNotEmpty)
+                              Chip(
+                                avatar: const Icon(
+                                  Icons.shield_outlined,
+                                  size: 12,
+                                ),
+                                label: Text(c.enjeu!),
+                                backgroundColor: Colors.blue.shade50,
+                                labelStyle: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.blue.shade900,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 0,
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 2),
+
+                // ACTIONS
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.peutModifierConsigne && !c.estValidee)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.edit,
+                          size: 18,
+                          color: Colors.blue, // Couleur bleue
+                        ),
+                        tooltip: "Modifier",
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => widget.onModification(c),
+                      ),
+                    if (widget.peutAgirSurConsigne && !c.estValidee)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.gps_fixed,
+                          size: 18,
+                          color: Color(0xFF92C022), // Couleur personnalisée
+                        ),
+                        tooltip: "Localiser",
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => widget.onLocaliser(c.contenu),
+                      ),
+                    if (widget.peutSupprimerConsigneNonValidee && !c.estValidee)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.delete,
+                          size: 18,
+                          color: Colors.red, // Couleur rouge
+                        ),
+                        tooltip: "Supprimer",
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => widget.onSuppression(c),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 6),
+
+            // OBSERVATION NON REALISATION (champ visible)
+            if (!c.estValidee && widget.peutAgirSurConsigne)
+              _buildChampObservation(
+                context: context,
+                consigne: c,
+                controller: widget.obsNonRealiseeController,
+                label: "Observation (si non réalisée)",
+                hint: "Raison de la non réalisation...",
+                onSave: (texte) {
+                  widget.onEnregistrerObsNonRealisation(c, texte);
+                },
+                backgroundColor: Colors.orange.shade50,
+                iconColor: Colors.orange.shade800,
+              ),
+
+            // HISTORIQUE DES OBSERVATIONS NON REALISEES (déroulant)
+            if (c.commentairesNonRealisation != null &&
+                c.commentairesNonRealisation!.isNotEmpty)
+              _buildChampObservationDeroulant(
+                context: context,
+                commentaires: c.commentairesNonRealisation!,
+                label: "Observations précédentes",
+                backgroundColor: Colors.orange.shade100,
+                iconColor: Colors.orange.shade800,
+              ),
+
+            // OBSERVATION VALIDATION (champ visible)
+            if (c.estValidee && widget.peutAgirSurConsigne)
+              _buildChampObservation(
+                context: context,
+                consigne: c,
+                controller: widget.obsValidationController,
+                label: "Observation après validation",
+                hint: "Ajouter un commentaire...",
+                onSave: (texte) {
+                  widget.onEnregistrerObsValidation(c, texte);
+                },
+                backgroundColor: Colors.green.shade50,
+                iconColor: Colors.green.shade800,
+              ),
+
+            // DOSIMETRIE
+            if (c.dosimetrieInfo != null && c.dosimetrieInfo!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    "Dosimétrie : ${c.dosimetrieInfo!}",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.blue.shade900,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChampObservation({
+    required BuildContext context,
+    required Consigne consigne,
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required Function(String) onSave,
+    Color backgroundColor = Colors.white,
+    Color iconColor = Colors.grey,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 3),
+          TextField(
+            controller: controller,
+            maxLines: null,
+            minLines: 1,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade500,
+              ),
+              filled: true,
+              fillColor: backgroundColor,
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6.0),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6.0),
+                borderSide: BorderSide(color: Colors.grey.shade400),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6.0),
+                borderSide: BorderSide(
+                    color: Theme.of(context).primaryColor, width: 1.4),
+              ),
+              suffixIconConstraints:
+                  const BoxConstraints(minHeight: 32, minWidth: 32),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  Icons.save_alt_outlined,
+                  color: iconColor,
+                  size: 19,
+                ),
+                tooltip: "Enregistrer l'observation",
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                onPressed: () {
+                  onSave(controller.text.trim());
+                  FocusScope.of(context).unfocus();
+                },
+              ),
+            ),
+            onSubmitted: (text) {
+              onSave(text.trim());
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChampObservationDeroulant({
+    required BuildContext context,
+    required List<Commentaire> commentaires,
+    required String label,
+    Color backgroundColor = Colors.white,
+    Color iconColor = Colors.grey,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: ExpansionTile(
+        title: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w500,
+            color: iconColor,
+          ),
+        ),
+        children: commentaires.map((comment) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    comment.texte,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    "Par ${comment.auteurNomPrenom} le ${comment.date.toString().split(' ')[0]}",
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey.shade600,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _ConsignesStreamBuilder extends StatefulWidget {
+  final String selectedTranche;
+  final Stream<List<Consigne>> Function() getConsignesStream;
+  final Widget Function(List<Consigne>) buildConsignesList;
+  final _ConsignesCache cache;
+
+  const _ConsignesStreamBuilder({
+    required this.selectedTranche,
+    required this.getConsignesStream,
+    required this.buildConsignesList,
+    required this.cache,
+  });
+
+  @override
+  State<_ConsignesStreamBuilder> createState() =>
+      _ConsignesStreamBuilderState();
+}
+
+class _ConsignesStreamBuilderState extends State<_ConsignesStreamBuilder> {
+  late Stream<List<Consigne>> _filteredStream;
+
+  @override
+  void initState() {
+    super.initState();
+    // Créer un stream qui filtre les listes identiques
+    _filteredStream = widget.getConsignesStream().where((newList) {
+      return widget.cache.hasChanged(newList);
+    });
+  }
+
+  @override
+  void didUpdateWidget(_ConsignesStreamBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedTranche != widget.selectedTranche) {
+      widget.cache.clear();
+      _filteredStream = widget.getConsignesStream().where((newList) {
+        return widget.cache.hasChanged(newList);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Consigne>>(
+      stream: _filteredStream,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Erreur: ${snapshot.error}'));
+        }
+        final toutesLesConsignes = snapshot.data ?? [];
+        final consignesActives = toutesLesConsignes
+            .where((consigne) => !consigne.estValidee)
+            .toList();
+        if (consignesActives.isEmpty) {
+          return const Center(
+            child: Text("Aucune consigne active pour cette tranche."),
+          );
+        }
+        return widget.buildConsignesList(consignesActives);
+      },
     );
   }
 }

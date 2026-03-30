@@ -1,6 +1,7 @@
 // lib/screens/archive_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../model/consigne.dart';
 import 'excel_screen.dart';
 
@@ -66,9 +67,62 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     return "$day/$month/$year";
   }
 
-  // Formate la date pour servir de clé de groupe (YYYY-MM-DD)
+  // Formate la date pour servir de clé de groupe (YYYY-MM-DD-shift), ajustée pour les postes
   String _getDateKey(DateTime date) {
-    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+    int hour = date.hour;
+    String shift;
+    DateTime adjustedDate = date;
+    if (hour >= 5 && hour < 13) {
+      shift = 'morning';
+    } else if (hour >= 13 && hour < 21) {
+      shift = 'afternoon';
+    } else if (hour >= 21) {
+      shift = 'night';
+    } else {
+      // hour < 5, night shift of previous day
+      shift = 'night';
+      adjustedDate = date.subtract(const Duration(days: 1));
+    }
+    return "${adjustedDate.year}-${adjustedDate.month.toString().padLeft(2, '0')}-${adjustedDate.day.toString().padLeft(2, '0')}-$shift";
+  }
+
+  // Obtient la date de début du poste à partir de la clé
+  DateTime _getShiftStartDate(String key) {
+    List<String> parts = key.split('-');
+    int year = int.parse(parts[0]);
+    int month = int.parse(parts[1]);
+    int day = int.parse(parts[2]);
+    String shift = parts[3];
+    int startHour;
+    if (shift == 'morning') {
+      startHour = 5;
+    } else if (shift == 'afternoon') {
+      startHour = 13;
+    } else {
+      // night
+      startHour = 21;
+    }
+    return DateTime(year, month, day, startHour);
+  }
+
+  // Formate la date et le poste à partir de la clé de groupe
+  String _formatDateAndShiftFromKey(String key) {
+    List<String> parts = key.split('-');
+    int year = int.parse(parts[0]);
+    int month = int.parse(parts[1]);
+    int day = int.parse(parts[2]);
+    String shift = parts[3];
+    String shiftName;
+    if (shift == 'morning') {
+      shiftName = 'Matin';
+    } else if (shift == 'afternoon') {
+      shiftName = 'Après-midi';
+    } else {
+      shiftName = 'Nuit';
+    }
+    DateTime date = DateTime(year, month, day);
+    String dateStr = _formatDateSimple(date, showTime: false);
+    return '$dateStr - $shiftName';
   }
 
   Widget _buildBlocHeader(String title,
@@ -178,9 +232,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           }
         }
 
-        // 3. Tri des dates (du plus récent au plus ancien)
+        // 3. Tri des groupes (du plus récent au plus ancien)
         List<String> sortedKeys = groupedArchives.keys.toList()
-          ..sort((a, b) => b.compareTo(a));
+          ..sort((a, b) {
+            DateTime startA = _getShiftStartDate(a);
+            DateTime startB = _getShiftStartDate(b);
+            return startB.compareTo(startA);
+          });
 
         return Stack(
           children: [
@@ -214,12 +272,32 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                               child: ExpansionTile(
                                 leading: const Icon(Icons.calendar_today,
                                     color: Colors.teal),
-                                title: Text(
-                                  _formatDateSimple(
-                                      dayConsignes.first.dateValidation,
-                                      showTime: false),
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
+                                title: Builder(
+                                  builder: (context) {
+                                    // Calcul du total de dosimétrie pour ce poste
+                                    double totalDosimetrie = 0.0;
+                                    for (var c in dayConsignes) {
+                                      if (c.dosimetrieInfo != null) {
+                                        // Extraire le total de la chaîne (après "Total:")
+                                        final match = RegExp(
+                                                r'Total:\s*(\d+(?:[,.]\d+)?)')
+                                            .firstMatch(c.dosimetrieInfo!);
+                                        if (match != null) {
+                                          final numStr = match
+                                              .group(1)!
+                                              .replaceAll(',', '.');
+                                          double? val = double.tryParse(numStr);
+                                          if (val != null)
+                                            totalDosimetrie += val;
+                                        }
+                                      }
+                                    }
+                                    return Text(
+                                      '${_formatDateAndShiftFromKey(dateKey)} (Total dosimétrie: ${NumberFormat("0.000", "fr_FR").format(totalDosimetrie)} mSv)',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    );
+                                  },
                                 ),
                                 subtitle: Text(
                                     "${dayConsignes.length} consigne(s) validée(s)"),
@@ -287,7 +365,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Ligne modifiée pour inclure le créateur (auteur)
-              Text("Créé par: ${c.auteurNomPrenomCreation}",
+              Text(
+                  "Créé par: ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${_formatDateSimple(c.dateEmission)}",
                   style: const TextStyle(fontSize: 11, color: Colors.black54)),
               Text("Validé par: ${c.nomPrenomValidation ?? 'Inconnu'}",
                   style: const TextStyle(

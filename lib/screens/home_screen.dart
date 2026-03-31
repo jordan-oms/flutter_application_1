@@ -192,19 +192,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _updateUnreadCount(List<InfoChantier> infos) async {
-    final prefs = await SharedPreferences.getInstance();
-    // On récupère la date stockée (en millisecondes)
-    int? lastCheckMillis = prefs.getInt('last_infos_check_${_selectedTranche}');
-
+    // Nouveau système : compter les infos non lues par l'utilisateur actuel
     int count = 0;
-    if (lastCheckMillis != null) {
-      DateTime lastCheck = DateTime.fromMillisecondsSinceEpoch(lastCheckMillis);
-      // On compte les infos dont la date d'émission est après la dernière consultation
-      count =
-          infos.where((info) => info.dateEmission.isAfter(lastCheck)).length;
-    } else {
-      // Si c'est la première fois, on considère tout comme lu ou on affiche tout
-      count = infos.length;
+
+    for (final info in infos) {
+      // Vérifier si l'utilisateur actuel a déjà lu cette info
+      final bool estLueParUtilisateur =
+          info.lectures.any((lecture) => lecture.userId == _currentUser?.uid);
+      // Ne compter que si l'utilisateur ne l'a pas lue ET n'est pas l'auteur
+      final bool estAuteur = info.auteurIdCreation == _currentUser?.uid;
+
+      if (!estLueParUtilisateur && !estAuteur) {
+        count++;
+      }
     }
 
     if (mounted && _unreadInfosCount != count) {
@@ -1147,6 +1147,104 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Future<void> _marquerInfoCommeLue(InfoChantier info) async {
+    try {
+      // Vérifier si l'utilisateur a déjà lu cette info
+      final dejaLue = info.lectures.any((l) => l.userId == _currentUser?.uid);
+      if (dejaLue) {
+        return; // Déjà lue, rien à faire
+      }
+
+      // Ajouter une nouvelle lecture
+      final nouvelleLecture = LectureInfo(
+        userId: _currentUser!.uid,
+        userNomPrenom: _currentUserNomPrenom,
+        dateLecture: DateTime.now(),
+      );
+
+      final lecturesUpd = [...info.lectures, nouvelleLecture];
+      final infoMiseAJour = info.copyWith(lectures: lecturesUpd);
+
+      await _updateInfoChantierDB(infoMiseAJour);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Information marquée comme lue.")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Erreur : $e")),
+        );
+      }
+    }
+  }
+
+  void _presenterDialogueLectures(BuildContext context, InfoChantier info) {
+    if (info.lectures.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Aucun lecteur pour cette info.")),
+      );
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(
+            "Lecteurs de l'information (${info.lectures.length})",
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: info.lectures.map((lecture) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          lecture.userNomPrenom,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Lu le: ${_formatDateSimple(lecture.dateLecture)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text("Fermer"),
+            )
+          ],
+        );
+      },
+    );
+  }
+
   String _formatDateSimple(DateTime? date, {bool showTime = true}) {
     if (date == null) return 'Date inconnue';
     String day = date.day.toString().padLeft(2, '0');
@@ -1576,20 +1674,58 @@ class _HomeScreenState extends State<HomeScreen> {
                 itemCount: infos.length,
                 itemBuilder: (itemBuilderContext, index) {
                   final info = infos[index];
+                  final bool estLue =
+                      info.lectures.any((l) => l.userId == _currentUser?.uid);
+                  final bool estAuteur =
+                      info.auteurIdCreation == _currentUser?.uid;
+
                   return Card(
                     key: ValueKey(info.id),
                     margin:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    color: Colors.blue.shade50,
+                    color: estLue ? Colors.blue.shade50 : Colors.cyan.shade50,
+                    elevation: estLue ? 1 : 2,
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12.0, 12.0, 4.0, 12.0),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          const Padding(
-                            padding: EdgeInsets.only(right: 12.0, top: 2.0),
-                            child: Icon(Icons.info_outline,
-                                color: Colors.blue, size: 24),
+                          Stack(
+                            alignment: Alignment.topRight,
+                            children: [
+                              Padding(
+                                padding:
+                                    const EdgeInsets.only(right: 8.0, top: 2.0),
+                                child: Icon(Icons.info_outline,
+                                    color: estLue
+                                        ? Colors.blue
+                                        : Colors.cyan.shade700,
+                                    size: 24),
+                              ),
+                              // Badge visible seulement si pas auteur, pas lue et si d'autres l'ont lue
+                              if (!estAuteur &&
+                                  !estLue &&
+                                  info.lectures.isNotEmpty)
+                                Positioned(
+                                  top: -4,
+                                  right: -4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Text(
+                                      info.lectures.length.toString(),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                           Expanded(
                             child: Column(
@@ -1597,9 +1733,14 @@ class _HomeScreenState extends State<HomeScreen> {
                               children: <Widget>[
                                 Text(
                                   info.contenu,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 16,
-                                      fontWeight: FontWeight.w500),
+                                      fontWeight: estLue
+                                          ? FontWeight.w500
+                                          : FontWeight.w600,
+                                      color: estLue
+                                          ? Colors.black87
+                                          : Colors.cyan.shade900),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
@@ -1620,6 +1761,33 @@ class _HomeScreenState extends State<HomeScreen> {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: <Widget>[
+                              // Bouton pour voir les lecteurs (pour l'auteur, chefs de chantier et admins)
+                              if ((estAuteur || peutModifierInfo) &&
+                                  info.lectures.isNotEmpty)
+                                IconButton(
+                                  icon: Icon(Icons.visibility_outlined,
+                                      color: Colors.green.shade700, size: 22),
+                                  tooltip:
+                                      'Voir les lectures (${info.lectures.length})',
+                                  padding: const EdgeInsets.all(4),
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () {
+                                    _presenterDialogueLectures(
+                                        itemBuilderContext, info);
+                                  },
+                                ),
+                              // Bouton pour marquer comme lue (seulement si pas auteur)
+                              if (!estAuteur && !estLue)
+                                IconButton(
+                                  icon: Icon(Icons.done_all_outlined,
+                                      color: Colors.blue.shade700, size: 22),
+                                  tooltip: 'Marquer comme lue',
+                                  padding: const EdgeInsets.all(4),
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () {
+                                    _marquerInfoCommeLue(info);
+                                  },
+                                ),
                               if (peutModifierInfo)
                                 IconButton(
                                   icon: Icon(Icons.edit_note_outlined,
@@ -2027,15 +2195,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _currentIndex = index;
           });
 
-          // SI ON CLIQUE SUR L'ONGLET INFOS (Index 1)
-          if (index == 1 && _selectedTranche != null) {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setInt('last_infos_check_${_selectedTranche}',
-                DateTime.now().millisecondsSinceEpoch);
-            setState(() {
-              _unreadInfosCount = 0;
-            });
-          }
+          // Plus de marquage automatique des infos comme lues
+          // Le badge reste affiché jusqu'à ce que chaque info soit marquée comme lue individuellement
         },
         items: navBarItems,
         // ...

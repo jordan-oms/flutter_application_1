@@ -1,6 +1,34 @@
 // model/info_chantier.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+class LectureInfo {
+  final String userId;
+  final String userNomPrenom;
+  final DateTime dateLecture;
+
+  LectureInfo({
+    required this.userId,
+    required this.userNomPrenom,
+    required this.dateLecture,
+  });
+
+  factory LectureInfo.fromJson(Map<String, dynamic> json) {
+    return LectureInfo(
+      userId: json['userId'] as String,
+      userNomPrenom: json['userNomPrenom'] as String,
+      dateLecture: (json['dateLecture'] as Timestamp).toDate(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'userId': userId,
+      'userNomPrenom': userNomPrenom,
+      'dateLecture': Timestamp.fromDate(dateLecture),
+    };
+  }
+}
+
 class InfoChantier {
   final String id;
   final String tranche; // Pour lier l'info à une tranche
@@ -9,6 +37,7 @@ class InfoChantier {
   final String auteurIdCreation;
   final String auteurNomPrenomCreation;
   final String roleAuteurCreation;
+  final List<LectureInfo> lectures; // Suivi des lectures
 
   InfoChantier({
     required this.id,
@@ -18,9 +47,11 @@ class InfoChantier {
     required this.auteurIdCreation,
     required this.auteurNomPrenomCreation,
     required this.roleAuteurCreation,
+    this.lectures = const [],
   });
 
   factory InfoChantier.fromJson(Map<String, dynamic> json) {
+    final lecturesData = json['lectures'] as List<dynamic>? ?? [];
     return InfoChantier(
       id: json['id'] as String,
       tranche: json['tranche'] as String,
@@ -29,6 +60,9 @@ class InfoChantier {
       auteurIdCreation: json['auteurIdCreation'] as String,
       auteurNomPrenomCreation: json['auteurNomPrenomCreation'] as String,
       roleAuteurCreation: json['roleAuteurCreation'] as String,
+      lectures: lecturesData
+          .map((e) => LectureInfo.fromJson(e as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -42,6 +76,7 @@ class InfoChantier {
       'auteurIdCreation': auteurIdCreation,
       'auteurNomPrenomCreation': auteurNomPrenomCreation,
       'roleAuteurCreation': roleAuteurCreation,
+      'lectures': lectures.map((l) => l.toJson()).toList(),
     };
   }
 
@@ -54,6 +89,7 @@ class InfoChantier {
     String? auteurIdCreation,
     String? auteurNomPrenomCreation,
     String? roleAuteurCreation,
+    List<LectureInfo>? lectures,
   }) {
     return InfoChantier(
       id: id ?? this.id,
@@ -61,9 +97,10 @@ class InfoChantier {
       contenu: contenu ?? this.contenu,
       dateEmission: dateEmission ?? this.dateEmission,
       auteurIdCreation: auteurIdCreation ?? this.auteurIdCreation,
-      auteurNomPrenomCreation: auteurNomPrenomCreation ??
-          this.auteurNomPrenomCreation,
+      auteurNomPrenomCreation:
+          auteurNomPrenomCreation ?? this.auteurNomPrenomCreation,
       roleAuteurCreation: roleAuteurCreation ?? this.roleAuteurCreation,
+      lectures: lectures ?? this.lectures,
     );
   }
 }

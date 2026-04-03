@@ -41,12 +41,10 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
 
   final Map<String, List<String>> categories = {
     "Contrôle & Protection ": [
-      "Pas besoin de Micout",
       "Plaque de SAS 2*1",
       "Tapis piégeant",
       "Saut de zone",
       "Contaminamètre",
-      "Nombre de matelas",
       "Borne à air",
       "Nombre de protection biologique",
       "Boyau d'alimentation",
@@ -54,21 +52,21 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
       "Boyau 25m",
     ],
     "Aspiration": [
-      "Cylair  3000",
-      "Cylair  1500",
-      "Cylair  1200",
-      "Cylair  500",
-      "Cylair 300",
-      "Nombre de gaine cyclair",
+      "Déprimogéne 3000",
+      "Déprimogéne 1500",
+      "Déprimogéne 1200",
+      "Déprimogéne 500",
+      "Déprimogéne 300",
+      "Nombre de gaine Déprimogéne ",
     ],
-    "Échafaudage & Structure": [
+    "Structure": [
       "Structure pro-bio",
-      "Barre échafaudage 2m",
-      "Barre échafaudage 1m",
-      "Barre échafaudage 70cm",
-      "Barre échafaudage 50cm",
-      "Barre échafaudage 25cm",
-      "Pôteau échafaudage ",
+      "Barre de structure de SAS 2m",
+      "Barre de structure de SAS 1m",
+      "Barre de structure de SAS 0,7m",
+      "Barre de structure de SAS 0,5m",
+      "Barre de structure de SAS 0,25m",
+      "Pôteau de structure de SAS ",
       "Semelles",
     ],
   };

@@ -615,7 +615,17 @@ class _HomeScreenState extends State<HomeScreen> {
     // La méthode toJson() dans votre modèle Consigne fait déjà tout le travail.
     // Cette fonction devient donc beaucoup plus simple.
     try {
-      await _consignesRefGlobal.doc(consigne.id).update(consigne.toJson());
+      await _consignesRefGlobal.doc(consigne.id).update({
+        'estValidee': consigne.estValidee,
+        'dateValidation': consigne.dateValidation,
+        'commentaireValidation': consigne.commentaireValidation,
+        'idAuteurValidation': consigne.idAuteurValidation,
+        'nomPrenomValidation':
+            consigne.nomPrenomValidation, // ✅ maintenant autorisé
+        'dosimetrieInfo': consigne.dosimetrieInfo,
+        'estNonRealiseeEffectivement': consigne.estNonRealiseeEffectivement,
+        'commentairesNonRealisation': consigne.commentairesNonRealisation,
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

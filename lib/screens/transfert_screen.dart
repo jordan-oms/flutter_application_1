@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../model/commentaire.dart';
 import '../model/transfert.dart';
@@ -34,6 +35,9 @@ class _TransfertsCache {
       if (oldC.id != newC.id ||
           oldC.estValidee != newC.estValidee ||
           oldC.contenu != newC.contenu ||
+          oldC.lieuDepart != newC.lieuDepart ||
+          oldC.lieuArrivee != newC.lieuArrivee ||
+          oldC.heureDepart != newC.heureDepart ||
           oldC.commentairesNonRealisation?.length !=
               newC.commentairesNonRealisation?.length ||
           oldC.dosimetrieInfo != newC.dosimetrieInfo) {
@@ -229,7 +233,9 @@ class _TransfertScreenState extends State<TransfertScreen> {
         'idAuteurValidation': transfert.idAuteurValidation,
         'nomPrenomValidation': transfert.nomPrenomValidation,
         'estNonRealiseeEffectivement': transfert.estNonRealiseeEffectivement,
-        'commentairesNonRealisation': transfert.commentairesNonRealisation,
+        'commentairesNonRealisation': transfert.commentairesNonRealisation
+            ?.map((c) => c.toJson())
+            .toList(),
         'heureDepartReel': transfert.heureDepartReel,
         'heureArriveeReel': transfert.heureArriveeReel,
       });
@@ -474,6 +480,18 @@ class _TransfertScreenState extends State<TransfertScreen> {
                 ElevatedButton(
                   child: const Text('VALIDER'),
                   onPressed: () {
+                    if (selectedHeureDepartReel == null ||
+                        selectedHeureArriveeReel == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              "L'heure de départ et d'arrivée réelle sont obligatoires pour valider."),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+
                     final String observationTexte =
                         _observationValidationDialogController.text.trim();
 
@@ -637,10 +655,20 @@ class _TransfertScreenState extends State<TransfertScreen> {
 
   Widget _buildBlocHeader(
     String title, {
-    MaterialColor headerColor = Colors.purple,
+    Color headerColor = Colors.purple,
   }) {
+    // Si c'est une MaterialColor on utilise les shades, sinon on joue sur l'opacité
+    final Color bgColor = headerColor is MaterialColor
+        ? headerColor.shade100
+        : headerColor.withOpacity(0.15);
+    final Color textColor =
+        headerColor is MaterialColor ? headerColor.shade900 : headerColor;
+    final Color dateColor = headerColor is MaterialColor
+        ? headerColor.shade700
+        : headerColor.withOpacity(0.7);
+
     return Container(
-      color: headerColor.shade100,
+      color: bgColor,
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       child: Row(
         children: [
@@ -650,13 +678,13 @@ class _TransfertScreenState extends State<TransfertScreen> {
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
-                color: headerColor.shade900,
+                color: textColor,
               ),
             ),
           ),
           Text(
             _formatDateSimple(DateTime.now(), showTime: false),
-            style: TextStyle(fontSize: 14, color: headerColor.shade700),
+            style: TextStyle(fontSize: 14, color: dateColor),
           ),
         ],
       ),
@@ -713,6 +741,7 @@ class _TransfertScreenState extends State<TransfertScreen> {
         itemBuilder: (context, index) {
           final t = transferts[index];
 
+          // SEULE LA TRANCHE D'ORIGINE PEUT VALIDER (Mode lecture seule pour le portefeuille)
           final bool peutValider =
               peutAgirSurTransfert && (t.tranche == _selectedTranche);
 
@@ -763,7 +792,7 @@ class _TransfertScreenState extends State<TransfertScreen> {
           children: [
             _buildBlocHeader(
               "Transferts - $_selectedTranche",
-              headerColor: Colors.purple,
+              headerColor: const Color(0xFF102A43),
             ),
             _TransfertsStreamBuilder(
               selectedTranche: _selectedTranche!,
@@ -936,12 +965,16 @@ class _TransfertItemWidgetState extends State<TransfertItemWidget>
                                   Icon(Icons.account_balance_wallet_outlined,
                                       size: 14, color: Colors.purple.shade800),
                                   const SizedBox(width: 4),
-                                  Text(
-                                    "Portefeuille: ${t.tranchesVisibles!.join(', ')}",
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.purple.shade800,
-                                      fontWeight: FontWeight.w600,
+                                  // Flexible permet au texte de se réduire si l'écran est trop petit
+                                  Flexible(
+                                    child: Text(
+                                      "Portefeuille: ${t.tranchesVisibles!.join(', ')}",
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.purple.shade800,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1203,7 +1236,7 @@ class _TransfertItemWidgetState extends State<TransfertItemWidget>
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    "Par ${comment.auteurNomPrenom} le ${comment.date.toString().split(' ')[0]}",
+                    "Par ${comment.auteurNomPrenom} le ${DateFormat('dd/MM/yyyy HH:mm').format(comment.date)}",
                     style: TextStyle(
                       fontSize: 10,
                       color: Colors.grey.shade600,

@@ -55,6 +55,13 @@ class Transfert {
   });
 
   factory Transfert.fromJson(Map<String, dynamic> json) {
+    DateTime? toDateTime(dynamic value) {
+      if (value == null) return null;
+      if (value is fs.Timestamp) return value.toDate();
+      if (value is DateTime) return value;
+      return null;
+    }
+
     var rawCommentairesNonRealisation = json['commentairesNonRealisation'];
     List<Commentaire>? parsedCommentairesNonRealisation;
     if (rawCommentairesNonRealisation is List) {
@@ -64,31 +71,31 @@ class Transfert {
     }
 
     return Transfert(
-      id: json['id'] as String,
-      tranche: json['tranche'] as String,
+      id: json['id']?.toString() ?? '',
+      tranche: json['tranche']?.toString() ?? '',
       tranchesVisibles: (json['tranchesVisibles'] as List<dynamic>?)
-          ?.map((e) => e as String)
+          ?.map((e) => e.toString())
           .toList(),
-      contenu: json['contenu'] as String,
-      dateEmission: (json['dateEmission'] as fs.Timestamp).toDate(),
-      estPrioritaire: json['estPrioritaire'] as bool? ?? false,
-      auteurIdCreation: json['auteurIdCreation'] as String,
-      auteurNomPrenomCreation: json['auteurNomPrenomCreation'] as String,
-      roleAuteurCreation: json['roleAuteurCreation'] as String,
-      estValidee: json['estValidee'] as bool? ?? false,
-      dateValidation: (json['dateValidation'] as fs.Timestamp?)?.toDate(),
-      commentaireValidation: json['commentaireValidation'] as String?,
-      idAuteurValidation: json['idAuteurValidation'] as String?,
-      nomPrenomValidation: json['nomPrenomValidation'] as String?,
+      contenu: json['contenu']?.toString() ?? '',
+      dateEmission: toDateTime(json['dateEmission']) ?? DateTime.now(),
+      estPrioritaire: json['estPrioritaire'] == true,
+      auteurIdCreation: json['auteurIdCreation']?.toString() ?? '',
+      auteurNomPrenomCreation:
+          json['auteurNomPrenomCreation']?.toString() ?? '',
+      roleAuteurCreation: json['roleAuteurCreation']?.toString() ?? '',
+      estValidee: json['estValidee'] == true,
+      dateValidation: toDateTime(json['dateValidation']),
+      commentaireValidation: json['commentaireValidation']?.toString(),
+      idAuteurValidation: json['idAuteurValidation']?.toString(),
+      nomPrenomValidation: json['nomPrenomValidation']?.toString(),
       commentairesNonRealisation: parsedCommentairesNonRealisation,
-      estNonRealiseeEffectivement:
-          json['estNonRealiseeEffectivement'] as bool? ?? false,
-      dosimetrieInfo: json['dosimetrieInfo'] as String?,
-      lieuDepart: json['lieuDepart'] as String?,
-      lieuArrivee: json['lieuArrivee'] as String?,
-      heureDepart: (json['heureDepart'] as fs.Timestamp?)?.toDate(),
-      heureDepartReel: (json['heureDepartReel'] as fs.Timestamp?)?.toDate(),
-      heureArriveeReel: (json['heureArriveeReel'] as fs.Timestamp?)?.toDate(),
+      estNonRealiseeEffectivement: json['estNonRealiseeEffectivement'] == true,
+      dosimetrieInfo: json['dosimetrieInfo']?.toString(),
+      lieuDepart: json['lieuDepart']?.toString(),
+      lieuArrivee: json['lieuArrivee']?.toString(),
+      heureDepart: toDateTime(json['heureDepart']),
+      heureDepartReel: toDateTime(json['heureDepartReel']),
+      heureArriveeReel: toDateTime(json['heureArriveeReel']),
     );
   }
 

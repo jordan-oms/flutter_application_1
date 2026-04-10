@@ -221,6 +221,54 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
 
     setState(() => isLoading = true);
     try {
+      final String firstChar = nomRepere[0];
+      final String suffix = nomRepere.substring(1);
+      List<String> tranchesCibles = [];
+
+      // Définition des groupes de duplication
+      if (['1', '3', '5'].contains(firstChar)) {
+        tranchesCibles = ['1', '3', '5'];
+      } else if (['2', '4', '6'].contains(firstChar)) {
+        tranchesCibles = ['2', '4', '6'];
+      } else {
+        // Tranches hors groupe (0, 7, 8, 9, etc.)
+        tranchesCibles = [firstChar];
+      }
+
+      // 1. VÉRIFICATION ANTI-DOUBLON SUR TOUT LE GROUPE
+      List<String> dejaExistants = [];
+      for (String tr in tranchesCibles) {
+        String idVerif = tr + suffix;
+        final doc = await FirebaseFirestore.instance
+            .collection('reperes')
+            .doc(idVerif)
+            .get();
+        if (doc.exists) {
+          dejaExistants.add(idVerif);
+        }
+      }
+
+      if (dejaExistants.isNotEmpty) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text("Repère(s) déjà existant(s)"),
+              content: Text(
+                  "Impossible de créer ce groupe : le(s) repère(s) suivant(s) existe(nt) déjà : ${dejaExistants.join(', ')}"),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("OK"),
+                ),
+              ],
+            ),
+          );
+        }
+        setState(() => isLoading = false);
+        return;
+      }
+
       final userDoc = await FirebaseFirestore.instance
           .collection('utilisateurs')
           .doc(user.uid)
@@ -228,6 +276,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
       String nomComplet =
           "${userDoc.data()?['prenom'] ?? ""} ${userDoc.data()?['nom'] ?? ""}"
               .trim();
+      Timestamp maintenant = Timestamp.now();
 
       final Map<String, dynamic> materiels = {};
       materielControllers.forEach((key, controller) {
@@ -246,27 +295,38 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
         }
       });
 
-      await FirebaseFirestore.instance
-          .collection('reperes')
-          .doc(nomRepere)
-          .set({
-        'type': type,
-        'chantier': chantierController.text.trim(),
-        'local': localController.text.trim(),
-        'diametre': "${diametreController.text.trim()} DM",
-        'metrecube': "${metrecubeController.text.trim()} M3",
-        'materiels': materiels,
-        'createdBy': {
-          'userId': user.uid,
-          'nom': nomComplet,
-          'date': Timestamp.now()
-        },
-        'lastUpdate': {
-          'userId': user.uid,
-          'nom': nomComplet,
-          'date': Timestamp.now()
-        }
-      });
+      // 2. CRÉATION EN BATCH (Atomique)
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+
+      for (String tr in tranchesCibles) {
+        String idFinal = tr + suffix;
+        int? numTr = int.tryParse(tr);
+        String typeTr = (numTr != null && numTr % 2 == 0) ? "Pair" : "Impair";
+
+        DocumentReference docRef =
+            FirebaseFirestore.instance.collection('reperes').doc(idFinal);
+
+        batch.set(docRef, {
+          'type': typeTr,
+          'chantier': chantierController.text.trim(),
+          'local': localController.text.trim(),
+          'diametre': "${diametreController.text.trim()} DM",
+          'metrecube': "${metrecubeController.text.trim()} M3",
+          'materiels': materiels,
+          'createdBy': {
+            'userId': user.uid,
+            'nom': nomComplet,
+            'date': maintenant
+          },
+          'lastUpdate': {
+            'userId': user.uid,
+            'nom': nomComplet,
+            'date': maintenant
+          }
+        });
+      }
+
+      await batch.commit();
 
       if (mounted) Navigator.pop(context);
     } catch (e) {

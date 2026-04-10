@@ -6,9 +6,12 @@ import 'package:excel/excel.dart';
 import 'package:file_saver/file_saver.dart';
 
 import '../model/consigne.dart';
+import '../model/transfert.dart';
+import '../model/commentaire.dart';
 
 class ExcelScreen extends StatefulWidget {
-  final List<Consigne> archives;
+  final List<dynamic>
+      archives; // Changé en dynamic pour accepter Consigne et Transfert
   final String selectedTranche;
 
   const ExcelScreen({
@@ -33,18 +36,13 @@ class _ExcelScreenState extends State<ExcelScreen> {
         "${date.minute.toString().padLeft(2, '0')}";
   }
 
-  // --- NOUVELLE FONCTION POUR EXTRAIRE LE TOTAL ---
   String _extractTotalFromDosimetrie(String? dosimetrieInfo) {
     if (dosimetrieInfo == null || !dosimetrieInfo.contains('Total:')) {
       return '';
     }
-    // Trouve la partie "Total: X,XXX mSv."
     final totalPart = dosimetrieInfo.split('Total:').last.trim();
-    // Garde seulement le nombre (enlève " mSv.")
     return totalPart.split(' mSv').first.trim();
   }
-
-  // --- FIN DE LA NOUVELLE FONCTION ---
 
   Future<void> _showExportDialog() async {
     final fileNameController = TextEditingController(
@@ -65,23 +63,20 @@ class _ExcelScreenState extends State<ExcelScreen> {
               TextField(
                 controller: fileNameController,
                 decoration: const InputDecoration(
-                  labelText: 'Nom du fichier (sans .xlsx)',
-                ),
+                    labelText: 'Nom du fichier (sans .xlsx)'),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: sheetNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nom de la feuille',
-                ),
+                decoration:
+                    const InputDecoration(labelText: 'Nom de la feuille'),
               ),
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Annuler'),
-            ),
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Annuler')),
             ElevatedButton(
               onPressed: () {
                 Navigator.of(context).pop({
@@ -98,9 +93,7 @@ class _ExcelScreenState extends State<ExcelScreen> {
 
     if (result != null && result['fileName']!.isNotEmpty) {
       await _exportToExcel(
-        fileName: result['fileName']!,
-        sheetName: result['sheetName']!,
-      );
+          fileName: result['fileName']!, sheetName: result['sheetName']!);
     }
   }
 
@@ -120,20 +113,24 @@ class _ExcelScreenState extends State<ExcelScreen> {
         verticalAlign: VerticalAlign.Center,
       );
 
-      // --- 1. AJOUT DE LA COLONNE "TOTAL" DANS LES EN-TÊTES ---
+      // En-têtes complets pour Consignes et Transferts
       final headers = [
-        'Contenu de la consigne',
-        'Date d\'émission',
-        'Auteur',
-        'Rôle de l\'auteur',
-        'Catégorie',
-        'Enjeu',
-        'Est Prioritaire',
-        'Date de Validation',
-        'Commentaire de Validation',
-        'Détail Dosimétrie', // Renommé pour plus de clarté
-        'Total Dosimétrie (mSv)', // La nouvelle colonne
-        'Historique des observations'
+        'Type',
+        'Contenu / Description',
+        'Date émission',
+        'Auteur Création',
+        'Rôle Auteur',
+        'Lieu Départ',
+        'Lieu Arrivée',
+        'Date/Heure Planifiée',
+        'Heure Départ Réel',
+        'Heure Arrivée Réel',
+        'Validé par',
+        'Date Validation',
+        'Observation (Validation)',
+        'Dosimétrie (Détail)',
+        'Total Dosimétrie (mSv)',
+        'Commentaires Non-réalisation'
       ];
 
       for (var i = 0; i < headers.length; i++) {
@@ -145,47 +142,94 @@ class _ExcelScreenState extends State<ExcelScreen> {
       }
 
       for (int i = 0; i < widget.archives.length; i++) {
-        final consigne = widget.archives[i];
+        final item = widget.archives[i];
         final rowIndex = i + 1;
-        String historiqueObs = consigne.commentairesNonRealisation
+
+        String type = '';
+        String contenu = '';
+        String dateEmission = '';
+        String auteurCreation = '';
+        String roleAuteur = '';
+        String lieuDepart = '';
+        String lieuArrivee = '';
+        String planification = '';
+        String heureDepReel = '';
+        String heureArrReel = '';
+        String validePar = '';
+        String dateVal = '';
+        String obsVal = '';
+        String dosiDetail = '';
+        String dosiTotal = '';
+        String commsNonReal = '';
+
+        List<Commentaire>? comments;
+
+        if (item is Consigne) {
+          type = 'Consigne';
+          contenu = item.contenu;
+          dateEmission = _formatDateForExcel(item.dateEmission);
+          auteurCreation = item.auteurNomPrenomCreation;
+          roleAuteur = item.roleAuteurCreation;
+          validePar = item.nomPrenomValidation ?? '';
+          dateVal = _formatDateForExcel(item.dateValidation);
+          obsVal = item.commentaireValidation ?? '';
+          dosiDetail = item.dosimetrieInfo ?? '';
+          dosiTotal = _extractTotalFromDosimetrie(item.dosimetrieInfo);
+          comments = item.commentairesNonRealisation;
+        } else if (item is Transfert) {
+          type = 'Transfert';
+          contenu = item.contenu;
+          dateEmission = _formatDateForExcel(item.dateEmission);
+          auteurCreation = item.auteurNomPrenomCreation;
+          roleAuteur = item.roleAuteurCreation;
+          lieuDepart = item.lieuDepart ?? '';
+          lieuArrivee = item.lieuArrivee ?? '';
+          planification = _formatDateForExcel(item.heureDepart);
+          heureDepReel = _formatDateForExcel(item.heureDepartReel);
+          heureArrReel = _formatDateForExcel(item.heureArriveeReel);
+          validePar = item.nomPrenomValidation ?? '';
+          dateVal = _formatDateForExcel(item.dateValidation);
+          obsVal = item.commentaireValidation ?? '';
+          dosiDetail = item.dosimetrieInfo ?? '';
+          dosiTotal = _extractTotalFromDosimetrie(item.dosimetrieInfo);
+          comments = item.commentairesNonRealisation;
+        }
+
+        commsNonReal = comments
                 ?.map((c) =>
                     "${c.texte} (par ${c.auteurNomPrenom} le ${_formatDateForExcel(c.date)})")
                 .join('\n') ??
             '';
 
-        // --- 2. AJOUT DES DONNÉES SÉPARÉES DANS LA LIGNE ---
         final rowData = [
-          consigne.contenu,
-          _formatDateForExcel(consigne.dateEmission),
-          consigne.auteurNomPrenomCreation,
-          consigne.roleAuteurCreation,
-          consigne.categorie ?? '',
-          consigne.enjeu ?? '',
-          consigne.estPrioritaire ? 'Oui' : 'Non',
-          _formatDateForExcel(consigne.dateValidation),
-          consigne.commentaireValidation ?? '',
-          consigne.dosimetrieInfo ?? '',
-          // Le détail complet
-          _extractTotalFromDosimetrie(consigne.dosimetrieInfo),
-          // Le total extrait
-          historiqueObs,
+          type,
+          contenu,
+          dateEmission,
+          auteurCreation,
+          roleAuteur,
+          lieuDepart,
+          lieuArrivee,
+          planification,
+          heureDepReel,
+          heureArrReel,
+          validePar,
+          dateVal,
+          obsVal,
+          dosiDetail,
+          dosiTotal,
+          commsNonReal
         ];
 
         for (var j = 0; j < rowData.length; j++) {
           sheet
-                  .cell(CellIndex.indexByColumnRow(
-                      columnIndex: j, rowIndex: rowIndex))
-                  .value =
-              TextCellValue(
-                  rowData[j].toString()); // .toString() pour plus de sécurité
+              .cell(CellIndex.indexByColumnRow(
+                  columnIndex: j, rowIndex: rowIndex))
+              .value = TextCellValue(rowData[j].toString());
         }
       }
 
       final fileBytes = await excel.encode();
-
-      if (fileBytes == null) {
-        throw Exception("Erreur lors de la génération du fichier Excel");
-      }
+      if (fileBytes == null) throw Exception("Erreur génération Excel");
 
       await FileSaver.instance.saveFile(
         name: '$fileName.xlsx',
@@ -195,19 +239,15 @@ class _ExcelScreenState extends State<ExcelScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export de "$fileName.xlsx" lancé.')),
-        );
+            SnackBar(content: Text('Export réussi : $fileName.xlsx')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erreur lors de l'export : $e")),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("Erreur export : $e"), backgroundColor: Colors.red));
       }
     } finally {
-      if (mounted) {
-        setState(() => _isExporting = false);
-      }
+      if (mounted) setState(() => _isExporting = false);
     }
   }
 
@@ -215,30 +255,24 @@ class _ExcelScreenState extends State<ExcelScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Export Excel"),
-        backgroundColor: Colors.green[800],
-      ),
+          title: const Text("Export Excel Complet"),
+          backgroundColor: Colors.green[800]),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text("Nombre d'archives à exporter: ${widget.archives.length}"),
+            Text("Nombre d'éléments à exporter : ${widget.archives.length}"),
             const SizedBox(height: 20),
             ElevatedButton.icon(
               icon: _isExporting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2),
-                    )
+                  ? const CircularProgressIndicator(color: Colors.white)
                   : const Icon(Icons.download),
-              label: Text(
-                  _isExporting ? 'Export en cours...' : 'Exporter vers Excel'),
+              label: Text(_isExporting
+                  ? 'Export en cours...'
+                  : 'Générer Excel complet'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green[700],
-                foregroundColor: Colors.white,
-              ),
+                  backgroundColor: Colors.green[700],
+                  foregroundColor: Colors.white),
               onPressed: _isExporting ? null : _showExportDialog,
             ),
           ],

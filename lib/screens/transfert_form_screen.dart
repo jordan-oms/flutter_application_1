@@ -125,11 +125,26 @@ class _TransfertFormScreenState extends State<TransfertFormScreen> {
 
   Future<void> _validerEtEnregistrer() async {
     final contenu = _transfertController.text.trim();
+
+    // Vérification des champs obligatoires
+    if (_lieuDepart == null) {
+      _showErrorSnackBar("Veuillez sélectionner un lieu de départ.");
+      return;
+    }
+    if (_lieuArrivee == null) {
+      _showErrorSnackBar("Veuillez sélectionner un lieu d'arrivée.");
+      return;
+    }
+    if (_dateDepart == null) {
+      _showErrorSnackBar("Veuillez sélectionner une date.");
+      return;
+    }
+    if (_heureDepart == null) {
+      _showErrorSnackBar("Veuillez sélectionner une heure.");
+      return;
+    }
     if (contenu.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Le contenu du transfert ne peut pas être vide.")),
-      );
+      _showErrorSnackBar("Le détail du transfert ne peut pas être vide.");
       return;
     }
 
@@ -149,13 +164,21 @@ class _TransfertFormScreenState extends State<TransfertFormScreen> {
       }
 
       if (widget.transfertAEditer != null) {
-        // Modification
-        await _transfertsRefGlobal.doc(widget.transfertAEditer!.id).update({
-          'contenu': contenu,
-          'lieuDepart': _lieuDepart,
-          'lieuArrivee': _lieuArrivee,
-          'heureDepart': heureDepartComplete,
-          'tranchesVisibles': _selectedTranchesVisibles,
+        // Modification : on crée une copie de l'objet existant avec les nouvelles valeurs
+        final transfertModifie = widget.transfertAEditer!.copyWith(
+          contenu: contenu,
+          lieuDepart: _lieuDepart,
+          lieuArrivee: _lieuArrivee,
+          heureDepart: heureDepartComplete,
+          tranchesVisibles: _selectedTranchesVisibles,
+        );
+
+        // On met à jour le document avec les nouvelles données tout en gardant les anciennes (commentaires, etc.)
+        await _transfertsRefGlobal
+            .doc(transfertModifie.id)
+            .update(transfertModifie.toJson());
+        // On peut aussi ajouter les infos de modification si vous avez ces champs en base
+        await _transfertsRefGlobal.doc(transfertModifie.id).update({
           'modifieLe': FieldValue.serverTimestamp(),
           'modifiePar': widget.currentUserNomPrenom,
         });
@@ -360,6 +383,7 @@ class _TransfertFormScreenState extends State<TransfertFormScreen> {
                   children: widget.allTranches
                       .where((t) => t != widget.selectedTranche)
                       .map((t) {
+                    // On s'assure que la comparaison est stricte pour éviter les faux positifs
                     final isSelected = _selectedTranchesVisibles.contains(t);
                     return FilterChip(
                       label: Text(t),
@@ -367,7 +391,9 @@ class _TransfertFormScreenState extends State<TransfertFormScreen> {
                       onSelected: (bool selected) {
                         setState(() {
                           if (selected) {
-                            _selectedTranchesVisibles.add(t);
+                            if (!_selectedTranchesVisibles.contains(t)) {
+                              _selectedTranchesVisibles.add(t);
+                            }
                           } else {
                             _selectedTranchesVisibles.remove(t);
                           }
@@ -488,6 +514,15 @@ class _TransfertFormScreenState extends State<TransfertFormScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.orange.shade800,
       ),
     );
   }

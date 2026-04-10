@@ -160,16 +160,15 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
     final Map<String, dynamic> matsFinal = {};
     materielControllers.forEach((key, controller) {
       int val = int.tryParse(controller.text) ?? 0;
-      if (val > 0) {
-        if (key == "Borne à air" || key == "Nombre de protection biologique") {
-          matsFinal[key] = {
-            'quantite': val,
-            'type_algo':
-                algorithmeTypes[key] ?? (key == "Borne à air" ? "UFS" : "BFS")
-          };
-        } else {
-          matsFinal[key] = val;
-        }
+      // On enregistre tout, même si c'est 0, pour éviter de supprimer les clés de la DB
+      if (key == "Borne à air" || key == "Nombre de protection biologique") {
+        matsFinal[key] = {
+          'quantite': val,
+          'type_algo':
+              algorithmeTypes[key] ?? (key == "Borne à air" ? "UFS" : "BFS")
+        };
+      } else {
+        matsFinal[key] = val;
       }
     });
 

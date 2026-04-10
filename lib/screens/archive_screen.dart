@@ -62,6 +62,20 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     });
   }
 
+  @override
+  void didUpdateWidget(ArchiveScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Si la tranche sélectionnée a changé, on réinitialise les streams et les données
+    if (oldWidget.selectedTranche != widget.selectedTranche) {
+      setState(() {
+        _allConsignes = [];
+        _allTransferts = [];
+        _isLoading = true;
+      });
+      _setupStreams();
+    }
+  }
+
   void _setupStreams() {
     _consignesSub?.cancel();
     _transfertsSub?.cancel();
@@ -130,13 +144,20 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     final List<dynamic> combinedList = [..._allConsignes, ..._allTransferts];
     final filteredItems = combinedList.where((item) {
       final q = _searchQuery.toLowerCase();
+      final String myTranche = widget.selectedTranche?.trim() ?? "";
+
       if (item is Consigne) {
+        // On filtre les consignes par la tranche sélectionnée
+        final bool memeTranche = (item.tranche?.trim() ?? "") == myTranche;
         return item.estValidee &&
+            memeTranche &&
             (item.contenu.toLowerCase().contains(q) ||
                 item.auteurNomPrenomCreation.toLowerCase().contains(q));
       } else if (item is Transfert) {
+        // On filtre les transferts par la tranche d'origine (isolation des archives)
+        final bool estOrigine = (item.tranche?.trim() ?? "") == myTranche;
         return item.estValidee &&
-            item.tranche == widget.selectedTranche &&
+            estOrigine &&
             (item.contenu.toLowerCase().contains(q) ||
                 item.auteurNomPrenomCreation.toLowerCase().contains(q));
       }
@@ -158,11 +179,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       ..sort((a, b) => b.compareTo(a));
 
     return Scaffold(
-      appBar: AppBar(
-          title: Text("Archives - ${widget.selectedTranche}"),
-          backgroundColor: Colors.teal),
       body: Column(
         children: [
+          _buildArchiveHeader(),
           _buildSearchBar(),
           Expanded(
             child: ListView.builder(
@@ -191,6 +210,29 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         ],
       ),
       floatingActionButton: _buildExcelButton(filteredItems),
+    );
+  }
+
+  Widget _buildArchiveHeader() {
+    return Container(
+      color: Colors.orange.shade100,
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      child: Row(children: [
+        Expanded(
+          child: Text(
+            "Archives - ${widget.selectedTranche}",
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              color: Colors.orange.shade900,
+            ),
+          ),
+        ),
+        Text(
+          _formatDateSimple(DateTime.now()),
+          style: TextStyle(fontSize: 14, color: Colors.orange.shade700),
+        ),
+      ]),
     );
   }
 
@@ -226,12 +268,49 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       }
     }
 
+    int nbConsignes = items.whereType<Consigne>().length;
+    int nbTransferts = items.whereType<Transfert>().length;
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
       child: ExpansionTile(
-        title: Text(
-            '${_formatDateAndShiftFromKey(key)} (Total: ${totalDosi.toStringAsFixed(3)} mSv)',
-            style: const TextStyle(fontWeight: FontWeight.bold)),
+        shape: const Border(),
+        title: Row(
+          children: [
+            const Icon(Icons.calendar_today_outlined,
+                size: 20, color: Colors.teal),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${_formatDateAndShiftFromKey(key)} (Total dosimétrie: ${totalDosi.toStringAsFixed(3)} mSv)',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$nbConsignes Consigne(s) - $nbTransferts Transfert(s)',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         children: items
             .map((it) => it is Consigne
                 ? _buildConsigneItem(it)
@@ -293,8 +372,15 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   style: const TextStyle(fontSize: 12, color: Colors.blue)),
             if (c.commentairesNonRealisation != null &&
                 c.commentairesNonRealisation!.isNotEmpty)
-              Text("Non réalisé: ${c.commentairesNonRealisation!.join(', ')}",
-                  style: const TextStyle(fontSize: 11, color: Colors.orange)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: c.commentairesNonRealisation!.map((com) {
+                  return Text(
+                    "Non réalisé: ${com.texte} (Par ${com.auteurNomPrenom} le ${DateFormat('dd/MM/yyyy HH:mm').format(com.date)})",
+                    style: const TextStyle(fontSize: 11, color: Colors.orange),
+                  );
+                }).toList(),
+              ),
           ],
         ),
         trailing: widget.userRoles.contains(roleAdminString)
@@ -357,6 +443,17 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
               Text(
                   "Réel: ${t.heureDepartReel?.hour.toString().padLeft(2, '0')}:${t.heureDepartReel?.minute.toString().padLeft(2, '0')} -> ${t.heureArriveeReel?.hour.toString().padLeft(2, '0')}:${t.heureArriveeReel?.minute.toString().padLeft(2, '0')}",
                   style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+            if (t.commentairesNonRealisation != null &&
+                t.commentairesNonRealisation!.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: t.commentairesNonRealisation!.map((com) {
+                  return Text(
+                    "Non réalisé: ${com.texte} (Par ${com.auteurNomPrenom} le ${DateFormat('dd/MM/yyyy HH:mm').format(com.date)})",
+                    style: const TextStyle(fontSize: 11, color: Colors.orange),
+                  );
+                }).toList(),
+              ),
           ],
         ),
         trailing: widget.userRoles.contains(roleAdminString)
@@ -375,12 +472,12 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       backgroundColor: Colors.green[700],
       child: const Icon(Icons.grid_on, color: Colors.white),
       onPressed: () {
-        final cons = items.whereType<Consigne>().toList();
         Navigator.push(
             context,
             MaterialPageRoute(
                 builder: (context) => ExcelScreen(
-                    archives: cons, selectedTranche: widget.selectedTranche!)));
+                    archives: items,
+                    selectedTranche: widget.selectedTranche!)));
       },
     );
   }

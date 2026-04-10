@@ -3,7 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 import 'dart:ui';
+import 'dart:async';
 
 // Importez vos modèles
 import '../model/consigne.dart';
@@ -149,6 +151,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _obsNonRealiseeControllersTransferts = {};
   final Map<String, TextEditingController> _obsValidationControllersTransferts =
       {};
+
+  StreamSubscription<List<Transfert>>? _transfertsBadgeSubscription;
   List<Consigne> _lastConsignesSnapshot = [];
   final List<String> _categoriesConsignes = [
     "Confinement",
@@ -623,29 +627,59 @@ class _HomeScreenState extends State<HomeScreen> {
           .whereType<Transfert>()
           .toList();
 
-      // Logique pour le badge et les alertes
+      // Logique pour le badge et les alertes : on passe toujours par la mise à jour
       _updateTransfertsStatus(transferts);
 
       return transferts;
     });
   }
 
+  void _setupTransfertsBadgeListener() {
+    _transfertsBadgeSubscription?.cancel();
+    if (_selectedTranche == null) return;
+
+    _transfertsBadgeSubscription = _transfertsRefGlobal
+        .where(Filter.or(
+          Filter('tranche', isEqualTo: _selectedTranche),
+          Filter('tranchesVisibles', arrayContains: _selectedTranche),
+        ))
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs
+          .map((doc) {
+            try {
+              return Transfert.fromJson(doc.data() as Map<String, dynamic>);
+            } catch (e) {
+              return null;
+            }
+          })
+          .whereType<Transfert>()
+          .toList();
+    }).listen((transferts) {
+      _updateTransfertsStatus(transferts);
+    });
+  }
+
   void _updateTransfertsStatus(List<Transfert> transferts) {
     int unvalidatedCount = 0;
     final now = DateTime.now();
+    final myTranche = _selectedTranche?.trim();
 
     for (var t in transferts) {
-      if (!t.estValidee) {
+      // LE BADGE ET L'ALERTE S'AFFICHENT SI :
+      final String myTrancheNorm = myTranche ?? "";
+      final bool estOrigine = (t.tranche?.trim() ?? "") == myTrancheNorm;
+      final bool estDansPortefeuille =
+          t.tranchesVisibles?.any((e) => e.trim() == myTrancheNorm) ?? false;
+
+      if ((estOrigine || estDansPortefeuille) && !t.estValidee) {
         unvalidatedCount++;
 
-        // Vérification pour l'alerte (1h avant)
+        // Alerte pour toutes les tranches concernées (Origine + Portefeuille)
         if (t.heureDepart != null) {
           final difference = t.heureDepart!.difference(now);
           final alertKey = "${t.id}_$_selectedTranche";
 
-          // Si prévu dans moins d'une heure et pas encore passé de plus de 15 min
-          // ET qu'on ne l'a pas déjà "compris" POUR CETTE TRANCHE
-          // ET qu'on n'est pas déjà en train d'afficher l'alerte
           if (difference.inMinutes <= 60 &&
               difference.inMinutes > -15 &&
               !_dismissedTransfertAlerts.contains(alertKey) &&
@@ -659,6 +693,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
+    // Mise à jour du badge
     if (_unvalidatedTransfertsCount != unvalidatedCount) {
       _safelySetState(() {
         _unvalidatedTransfertsCount = unvalidatedCount;
@@ -767,14 +802,18 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await _consignesRefGlobal.doc(consigne.id).update({
         'estValidee': consigne.estValidee,
-        'dateValidation': consigne.dateValidation,
+        'dateValidation': consigne.dateValidation != null
+            ? Timestamp.fromDate(consigne.dateValidation!)
+            : null,
         'commentaireValidation': consigne.commentaireValidation,
         'idAuteurValidation': consigne.idAuteurValidation,
         'nomPrenomValidation':
             consigne.nomPrenomValidation, // ✅ maintenant autorisé
         'dosimetrieInfo': consigne.dosimetrieInfo,
         'estNonRealiseeEffectivement': consigne.estNonRealiseeEffectivement,
-        'commentairesNonRealisation': consigne.commentairesNonRealisation,
+        'commentairesNonRealisation': consigne.commentairesNonRealisation
+            ?.map((c) => c.toJson())
+            .toList(),
       });
     } catch (e) {
       if (mounted) {
@@ -2187,7 +2226,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     List<Widget> stackChildren = [
       _buildConsignesBlocWidget(),
-      _buildInfosBlocWidget(),
       TransfertScreen(
         selectedTranche: _selectedTranche ?? '',
         allTranches: _tranches,
@@ -2195,6 +2233,7 @@ class _HomeScreenState extends State<HomeScreen> {
         currentUserNomPrenom: _currentUserNomPrenom,
         roleDisplay: _roleDisplay,
       ),
+      _buildInfosBlocWidget(),
       ArchiveScreen(
         selectedTranche: _selectedTranche,
         tranches: _tranches,
@@ -2216,19 +2255,18 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: Icon(Icons.list_alt_outlined), label: 'Consignes'),
       BottomNavigationBarItem(
           icon: Badge(
+            label: Text(_unvalidatedTransfertsCount.toString()),
+            isLabelVisible: _unvalidatedTransfertsCount > 0,
+            child: const Icon(Icons.transfer_within_a_station_outlined),
+          ),
+          label: 'Transferts'),
+      BottomNavigationBarItem(
+          icon: Badge(
             label: Text(_unreadInfosCount.toString()),
             isLabelVisible: _unreadInfosCount > 0, // On cache si 0
             child: const Icon(Icons.info_outline),
           ),
           label: 'Infos'),
-      BottomNavigationBarItem(
-          icon: Badge(
-            label: Text(_unvalidatedTransfertsCount.toString()),
-            isLabelVisible: _unvalidatedTransfertsCount > 0,
-            backgroundColor: Colors.red,
-            child: const Icon(Icons.transfer_within_a_station_outlined),
-          ),
-          label: 'Transferts'),
       const BottomNavigationBarItem(
           icon: Icon(Icons.archive_outlined), label: 'Archives'),
     ];
@@ -2326,7 +2364,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   favoriteTranche: _favoriteTranche,
                   onTrancheSelected: (nouvelleTranche) async {
                     if (nouvelleTranche != _selectedTranche) {
-                      _safelySetState(() => _selectedTranche = nouvelleTranche);
+                      // CRUCIAL : On remet le badge à zéro immédiatement
+                      // pour éviter l'effet "fantôme" pendant le chargement
+                      _safelySetState(() {
+                        _selectedTranche = nouvelleTranche;
+                        _unvalidatedTransfertsCount = 0;
+                      });
+                      _setupTransfertsBadgeListener();
 
                       // Optionnel : On peut aussi mettre à jour localement le favori
                       // si le widget TrancheSelector le modifie en base.
@@ -2835,7 +2879,7 @@ class _ConsigneItemWidgetState extends State<ConsigneItemWidget>
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    "Par ${comment.auteurNomPrenom} le ${comment.date.toString().split(' ')[0]}",
+                    "Par ${comment.auteurNomPrenom} le ${DateFormat('dd/MM/yyyy HH:mm').format(comment.date)}",
                     style: TextStyle(
                       fontSize: 10,
                       color: Colors.grey.shade600,

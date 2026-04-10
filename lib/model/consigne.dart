@@ -46,6 +46,13 @@ class Consigne {
   });
 
   factory Consigne.fromJson(Map<String, dynamic> json) {
+    DateTime? toDateTime(dynamic value) {
+      if (value == null) return null;
+      if (value is fs.Timestamp) return value.toDate();
+      if (value is DateTime) return value;
+      return null;
+    }
+
     var rawCommentairesNonRealisation = json['commentairesNonRealisation'];
     List<Commentaire>? parsedCommentairesNonRealisation;
     if (rawCommentairesNonRealisation is List) {
@@ -55,25 +62,25 @@ class Consigne {
     }
 
     return Consigne(
-      id: json['id'] as String,
-      tranche: json['tranche'] as String,
-      contenu: json['contenu'] as String,
-      dateEmission: (json['dateEmission'] as fs.Timestamp).toDate(),
-      estPrioritaire: json['estPrioritaire'] as bool? ?? false,
-      auteurIdCreation: json['auteurIdCreation'] as String,
-      auteurNomPrenomCreation: json['auteurNomPrenomCreation'] as String,
-      roleAuteurCreation: json['roleAuteurCreation'] as String,
-      categorie: json['categorie'] as String?,
-      enjeu: json['enjeu'] as String?,
-      estValidee: json['estValidee'] as bool? ?? false,
-      dateValidation: (json['dateValidation'] as fs.Timestamp?)?.toDate(),
-      commentaireValidation: json['commentaireValidation'] as String?,
-      idAuteurValidation: json['idAuteurValidation'] as String?,
-      nomPrenomValidation: json['nomPrenomValidation'] as String?,
+      id: json['id']?.toString() ?? '',
+      tranche: json['tranche']?.toString() ?? '',
+      contenu: json['contenu']?.toString() ?? '',
+      dateEmission: toDateTime(json['dateEmission']) ?? DateTime.now(),
+      estPrioritaire: json['estPrioritaire'] == true,
+      auteurIdCreation: json['auteurIdCreation']?.toString() ?? '',
+      auteurNomPrenomCreation:
+          json['auteurNomPrenomCreation']?.toString() ?? '',
+      roleAuteurCreation: json['roleAuteurCreation']?.toString() ?? '',
+      categorie: json['categorie']?.toString(),
+      enjeu: json['enjeu']?.toString(),
+      estValidee: json['estValidee'] == true,
+      dateValidation: toDateTime(json['dateValidation']),
+      commentaireValidation: json['commentaireValidation']?.toString(),
+      idAuteurValidation: json['idAuteurValidation']?.toString(),
+      nomPrenomValidation: json['nomPrenomValidation']?.toString(),
       commentairesNonRealisation: parsedCommentairesNonRealisation,
-      estNonRealiseeEffectivement:
-          json['estNonRealiseeEffectivement'] as bool? ?? false,
-      dosimetrieInfo: json['dosimetrieInfo'] as String?,
+      estNonRealiseeEffectivement: json['estNonRealiseeEffectivement'] == true,
+      dosimetrieInfo: json['dosimetrieInfo']?.toString(),
     );
   }
 

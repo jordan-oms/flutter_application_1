@@ -747,6 +747,7 @@ class _TransfertScreenState extends State<TransfertScreen> {
 
           return TransfertItemWidget(
             transfert: t,
+            currentTranche: _selectedTranche!,
             peutAgirSurTransfert: peutValider,
             peutModifierTransfert:
                 peutModifierTransfert && (t.tranche == _selectedTranche),
@@ -809,6 +810,7 @@ class _TransfertScreenState extends State<TransfertScreen> {
 
 class TransfertItemWidget extends StatefulWidget {
   final Transfert transfert;
+  final String currentTranche;
   final bool peutAgirSurTransfert;
   final bool peutModifierTransfert;
   final bool peutSupprimerTransfertNonValidee;
@@ -824,6 +826,7 @@ class TransfertItemWidget extends StatefulWidget {
   const TransfertItemWidget({
     super.key,
     required this.transfert,
+    required this.currentTranche,
     required this.peutAgirSurTransfert,
     required this.peutModifierTransfert,
     required this.peutSupprimerTransfertNonValidee,
@@ -944,6 +947,35 @@ class _TransfertItemWidgetState extends State<TransfertItemWidget>
                                   fontWeight: FontWeight.w600,
                                   color: Colors.blue.shade800,
                                 ),
+                              ),
+                            ),
+                          if (t.tranche != widget.currentTranche)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                borderRadius: BorderRadius.circular(999),
+                                border:
+                                    Border.all(color: Colors.amber.shade200),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.source_outlined,
+                                      size: 14, color: Colors.amber.shade900),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    "Origine: ${t.tranche}",
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.amber.shade900,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           if (t.tranchesVisibles != null &&

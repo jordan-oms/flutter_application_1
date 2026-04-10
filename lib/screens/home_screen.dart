@@ -3,11 +3,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:ui';
 
 // Importez vos modèles
 import '../model/consigne.dart';
 import '../model/info_chantier.dart';
 import '../model/commentaire.dart';
+import '../model/transfert.dart';
 
 // Importez vos autres écrans
 import './role_selection_screen.dart';
@@ -16,6 +18,7 @@ import 'archive_screen.dart';
 import 'dosimetrie_dialog.dart';
 import 'gerer_les_utilisateur.dart';
 import './chantier_plus_screen.dart';
+import './transfert_screen.dart';
 
 // ... (vos imports existants)
 import '../widgets/tranche_selector.dart';
@@ -110,6 +113,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _roleDisplay = "Chargement...";
   int _currentIndex = 0;
   int _unreadInfosCount = 0;
+  int _unvalidatedTransfertsCount = 0;
+  final Set<String> _dismissedTransfertAlerts = {};
+  final Set<String> _currentlyShowingAlerts = {};
   late ValueNotifier<int> _unreadCountNotifier;
 
   // Cache pour éviter les reconstructions inutiles
@@ -135,8 +141,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final CollectionReference _consignesRefGlobal =
       FirebaseFirestore.instance.collection('consignes');
+  final CollectionReference _transfertsRefGlobal =
+      FirebaseFirestore.instance.collection('transferts');
   final Map<String, TextEditingController> _obsNonRealiseeControllers = {};
   final Map<String, TextEditingController> _obsValidationControllers = {};
+  final Map<String, TextEditingController>
+      _obsNonRealiseeControllersTransferts = {};
+  final Map<String, TextEditingController> _obsValidationControllersTransferts =
+      {};
   List<Consigne> _lastConsignesSnapshot = [];
   final List<String> _categoriesConsignes = [
     "Confinement",
@@ -586,6 +598,132 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Stream<List<Transfert>> getTransfertsStream() {
+    if (_selectedTranche == null) {
+      return Stream.value([]);
+    }
+    // Mise à jour de la requête pour inclure les transferts partagés (portefeuille)
+    return _transfertsRefGlobal
+        .where(Filter.or(
+          Filter('tranche', isEqualTo: _selectedTranche),
+          Filter('tranchesVisibles', arrayContains: _selectedTranche),
+        ))
+        .orderBy('dateEmission', descending: true)
+        .snapshots()
+        .map((snapshot) {
+      final transferts = snapshot.docs
+          .map((doc) {
+            try {
+              return Transfert.fromJson(doc.data() as Map<String, dynamic>);
+            } catch (e) {
+              debugPrint("Erreur de parsing d'un transfert: $e");
+              return null;
+            }
+          })
+          .whereType<Transfert>()
+          .toList();
+
+      // Logique pour le badge et les alertes
+      _updateTransfertsStatus(transferts);
+
+      return transferts;
+    });
+  }
+
+  void _updateTransfertsStatus(List<Transfert> transferts) {
+    int unvalidatedCount = 0;
+    final now = DateTime.now();
+
+    for (var t in transferts) {
+      if (!t.estValidee) {
+        unvalidatedCount++;
+
+        // Vérification pour l'alerte (1h avant)
+        if (t.heureDepart != null) {
+          final difference = t.heureDepart!.difference(now);
+          final alertKey = "${t.id}_$_selectedTranche";
+
+          // Si prévu dans moins d'une heure et pas encore passé de plus de 15 min
+          // ET qu'on ne l'a pas déjà "compris" POUR CETTE TRANCHE
+          // ET qu'on n'est pas déjà en train d'afficher l'alerte
+          if (difference.inMinutes <= 60 &&
+              difference.inMinutes > -15 &&
+              !_dismissedTransfertAlerts.contains(alertKey) &&
+              !_currentlyShowingAlerts.contains(alertKey)) {
+            _currentlyShowingAlerts.add(alertKey);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _showTransfertAlert(t, alertKey);
+            });
+          }
+        }
+      }
+    }
+
+    if (_unvalidatedTransfertsCount != unvalidatedCount) {
+      _safelySetState(() {
+        _unvalidatedTransfertsCount = unvalidatedCount;
+      });
+    }
+  }
+
+  void _showTransfertAlert(Transfert t, String alertKey) {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: "Alerte Transfert",
+      barrierColor: Colors.black.withOpacity(0.3),
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (context, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+          child: AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                SizedBox(width: 8),
+                Text("Transfert imminent"),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Attention, vous avez un transfert de prévu :"),
+                const SizedBox(height: 12),
+                Text(
+                  t.contenu,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Prévu à : ${t.heureDepart != null ? "${t.heureDepart!.hour.toString().padLeft(2, '0')}:${t.heureDepart!.minute.toString().padLeft(2, '0')}" : 'Heure inconnue'}",
+                  style: TextStyle(color: Colors.grey.shade700),
+                ),
+              ],
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade700,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _dismissedTransfertAlerts.add(alertKey);
+                    _currentlyShowingAlerts.remove(alertKey);
+                  });
+                  Navigator.of(context).pop();
+                },
+                child: const Text("COMPRIS"),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _addConsigneDB(Consigne consigne) async {
     // ... (Cette fonction reste inchangée)
     try {
@@ -606,6 +744,18 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text("Erreur de suppression de la consigne: $e")));
+      }
+    }
+  }
+
+  Future<void> _deleteTransfertDB(String id) async {
+    // Nouvelle fonction pour supprimer un transfert par ID
+    try {
+      await _transfertsRefGlobal.doc(id).delete();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Erreur de suppression du transfert: $e")));
       }
     }
   }
@@ -2038,6 +2188,13 @@ class _HomeScreenState extends State<HomeScreen> {
     List<Widget> stackChildren = [
       _buildConsignesBlocWidget(),
       _buildInfosBlocWidget(),
+      TransfertScreen(
+        selectedTranche: _selectedTranche ?? '',
+        allTranches: _tranches,
+        userRoles: _userRoles,
+        currentUserNomPrenom: _currentUserNomPrenom,
+        roleDisplay: _roleDisplay,
+      ),
       ArchiveScreen(
         selectedTranche: _selectedTranche,
         tranches: _tranches,
@@ -2046,6 +2203,11 @@ class _HomeScreenState extends State<HomeScreen> {
         deleteConsigneDB: _deleteConsigneDB,
         obsNonRealiseeControllers: _obsNonRealiseeControllers,
         obsValidationControllers: _obsValidationControllers,
+        getTransfertsStream: getTransfertsStream,
+        deleteTransfertDB: _deleteTransfertDB,
+        obsNonRealiseeControllersTransferts:
+            _obsNonRealiseeControllersTransferts,
+        obsValidationControllersTransferts: _obsValidationControllersTransferts,
       ),
     ];
 
@@ -2059,6 +2221,14 @@ class _HomeScreenState extends State<HomeScreen> {
             child: const Icon(Icons.info_outline),
           ),
           label: 'Infos'),
+      BottomNavigationBarItem(
+          icon: Badge(
+            label: Text(_unvalidatedTransfertsCount.toString()),
+            isLabelVisible: _unvalidatedTransfertsCount > 0,
+            backgroundColor: Colors.red,
+            child: const Icon(Icons.transfer_within_a_station_outlined),
+          ),
+          label: 'Transferts'),
       const BottomNavigationBarItem(
           icon: Icon(Icons.archive_outlined), label: 'Archives'),
     ];

@@ -178,68 +178,95 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                               color: Colors.black87));
                     },
                   ),
-                  const SizedBox(height: 60),
+                  // ... (reste du code inchangé jusqu'au Row)
+
                   if (_isProcessingLogin)
                     const CircularProgressIndicator(color: Colors.green)
                   else
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    // On utilise une Column pour empiler le Row (Capi/Consignes) et le nouveau logo
+                    Column(
                       children: [
-                        // --- 3. MISE À JOUR DU LOGO DE GAUCHE (Chantier+) ---
-                        // --- MISE À JOUR DU LOGO DE GAUCHE (Chantier+) DANS BUILD ---
-                        GestureDetector(
-                          onTap: () async {
-                            // 1. On lance l'écran de connexion d'abord
-                            bool? loginSuccess = await Navigator.push<bool?>(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    LoginChantierScreen(onSuccess: () {}),
-                              ),
-                            );
-
-                            // 2. Si la connexion est réussie, on va vers ChantierPlus
-                            if (loginSuccess == true) {
-                              if (!mounted) return;
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const ChantierPlusScreen(),
-                                ),
-                              );
-                            }
-                          },
-                          child: Tooltip(
-                            message: 'Authentification requise pour CAPILog',
-                            child: Image.asset(
-                              'assets/images/CAPILog.png',
-                              height: 120,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Icon(
-                                  Icons.add_business_outlined,
-                                  size: 120,
-                                  color: Colors.blueGrey,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // --- LOGO GAUCHE (CAPILog) ---
+                            GestureDetector(
+                              onTap: () async {
+                                bool? loginSuccess =
+                                    await Navigator.push<bool?>(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        LoginChantierScreen(onSuccess: () {}),
+                                  ),
                                 );
+
+                                if (loginSuccess == true) {
+                                  if (!mounted) return;
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ChantierPlusScreen(),
+                                    ),
+                                  );
+                                }
                               },
+                              child: Tooltip(
+                                message:
+                                    'Authentification requise pour CAPILog',
+                                child: Image.asset(
+                                  'assets/images/CAPILog.png',
+                                  height: 100,
+                                  // Ajusté légèrement pour l'équilibre
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const Icon(Icons.add_business_outlined,
+                                          size: 100),
+                                ),
+                              ),
                             ),
-                          ),
+
+                            const SizedBox(width: 40),
+
+                            // --- LOGO DROITE (Consignes) ---
+                            GestureDetector(
+                              onTap: _startLoginProcess,
+                              child: Tooltip(
+                                message:
+                                    'Authentification requise pour Consignes',
+                                child: Image.asset(
+                                  'assets/images/icon1.png',
+                                  height: 100,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const Icon(Icons.login, size: 100),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
 
-                        const SizedBox(width: 40),
+                        const SizedBox(height: 30),
+                        // Espace entre les deux lignes de logos
 
-                        // --- Le logo de droite reste le bouton de connexion ---
+                        // --- NOUVEAU LOGO AMCR (Centré en dessous) ---
                         GestureDetector(
-                          onTap: _startLoginProcess, // Déclenche la connexion
+                          onTap: () {
+                            // Action future pour AMCR
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text("Projet AMCR à venir...")),
+                            );
+                          },
                           child: Tooltip(
-                            message: 'Authentification requise pour Consignes',
+                            message: 'Futur projet AMCR',
                             child: Image.asset(
-                              'assets/images/icon1.png',
-                              height: 100,
+                              'assets/images/AMCR.png',
+                              // Assurez-vous que l'image est dans vos assets
+                              height: 110,
                               errorBuilder: (context, error, stackTrace) {
                                 return const Icon(
-                                  Icons.login,
-                                  size: 100,
+                                  Icons.engineering,
+                                  size: 110,
                                   color: Colors.blueGrey,
                                 );
                               },

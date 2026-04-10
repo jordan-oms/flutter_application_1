@@ -45,6 +45,7 @@ flutter:
     - assets/images/chantier-.svg
     - assets/images/CAPILog.png
     - assets/images/VSP.png
+    - assets/images/AMCR.png
 
 
 flutter_launcher_icons:

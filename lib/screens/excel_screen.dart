@@ -120,6 +120,7 @@ class _ExcelScreenState extends State<ExcelScreen> {
       // En-têtes complets pour Consignes et Transferts
       final headers = [
         'Type',
+        'Catégorie / Enjeu',
         'Contenu / Description',
         'Date émission',
         'Auteur Création',
@@ -150,6 +151,7 @@ class _ExcelScreenState extends State<ExcelScreen> {
         final rowIndex = i + 1;
 
         String type = '';
+        String categorie = '';
         String contenu = '';
         String dateEmission = '';
         String auteurCreation = '';
@@ -172,19 +174,28 @@ class _ExcelScreenState extends State<ExcelScreen> {
           type = item.categorie == "Ajout Manuel"
               ? 'Consigne (Manuelle)'
               : 'Consigne';
+          categorie = [item.categorie, item.enjeu]
+              .where((s) => s != null && s.isNotEmpty)
+              .join(' / ');
           contenu = item.contenu;
           dateEmission = _formatDateForExcel(item.dateEmission);
           auteurCreation = item.auteurNomPrenomCreation;
           roleAuteur = item.roleAuteurCreation;
           validePar = item.nomPrenomValidation ?? '';
           dateVal = _formatDateForExcel(item.dateValidation);
+
+          // Détail des observations de validation
           obsVal = item.commentaireValidation ?? '';
+
           dosiDetail = item.dosimetrieInfo ?? '';
           dosiTotal = _extractTotalFromDosimetrie(item.dosimetrieInfo);
           comments = item.commentairesNonRealisation;
         } else if (item is Transfert) {
           type = 'Transfert';
-          contenu = item.contenu;
+          categorie = 'Logistique';
+          // Description enrichie du transfert (Contenu + Trajet)
+          contenu =
+              "${item.contenu} (De: ${item.lieuDepart ?? '?'} Vers: ${item.lieuArrivee ?? '?'})";
           dateEmission = _formatDateForExcel(item.dateEmission);
           auteurCreation = item.auteurNomPrenomCreation;
           roleAuteur = item.roleAuteurCreation;
@@ -201,26 +212,28 @@ class _ExcelScreenState extends State<ExcelScreen> {
           comments = item.commentairesNonRealisation;
         } else if (item is InfoChantier) {
           type = 'Information';
-          contenu = item.contenu;
+          categorie = 'Communication';
+          contenu = item.contenu; // Description complète de l'information
           dateEmission = _formatDateForExcel(item.dateEmission);
           auteurCreation = item.auteurNomPrenomCreation;
           roleAuteur = item.roleAuteurCreation;
           validePar = "${item.lectures.length} lecture(s)";
-          // On liste les lecteurs dans la colonne observation
+          // Suivi détaillé des lectures
           obsVal = item.lectures
               .map((l) =>
                   "${l.userNomPrenom} (${_formatDateForExcel(l.dateLecture)})")
-              .join(', ');
+              .join(' | ');
         }
 
         commsNonReal = comments
                 ?.map((c) =>
                     "${c.texte} (par ${c.auteurNomPrenom} le ${_formatDateForExcel(c.date)})")
-                .join('\n') ??
+                .join(' \n ') ??
             '';
 
         final rowData = [
           type,
+          categorie,
           contenu,
           dateEmission,
           auteurCreation,

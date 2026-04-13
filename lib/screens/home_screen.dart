@@ -141,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _consigneController = TextEditingController();
   bool _estPrioritaireNouvelleConsigne = false;
   String? _selectedEnjeuPourNouvelleConsigne;
+  String? _selectedCategoriePourNouvelleConsigne;
 
   Consigne? _consigneEnEdition;
   bool _isAddingConsigne = false;
@@ -477,20 +478,121 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _presenterAjoutConsigne() {
-    if (_consigneEnEdition != null) {
-      FocusScope.of(context).requestFocus(_ajoutConsigneFocusNode);
+  void _presenterAjoutConsigne() async {
+    if (_selectedTranche == null || _selectedTranche!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text(
-                "Veuillez d'abord terminer la modification en cours ou l'annuler.")),
+            content: Text("Veuillez d'abord sélectionner une tranche.")),
       );
       return;
     }
-    setState(() {
-      _isAddingConsigne = true;
-    });
-    FocusScope.of(context).requestFocus(_ajoutConsigneFocusNode);
+
+    // On utilise un contrôleur temporaire pour le dialogue
+    final TextEditingController tempController = TextEditingController();
+    String? selectedCategorie = _interfaceType == 'amcr' ? "Autre" : null;
+    String? selectedEnjeu;
+    bool estPrioritaire = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text("Nouvelle Consigne - $_selectedTranche"),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: tempController,
+                      maxLines: null,
+                      decoration: const InputDecoration(
+                        hintText: "Texte de la consigne...",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Choix de la catégorie (si pas AMCR)
+                    if (_interfaceType != 'amcr')
+                      DropdownButtonFormField<String>(
+                        value: selectedCategorie,
+                        decoration:
+                            const InputDecoration(labelText: "Catégorie"),
+                        items: _categoriesConsignes
+                            .map((cat) =>
+                                DropdownMenuItem(value: cat, child: Text(cat)))
+                            .toList(),
+                        onChanged: (val) =>
+                            setDialogState(() => selectedCategorie = val),
+                      ),
+                    const SizedBox(height: 8),
+                    // Choix de l'enjeu
+                    DropdownButtonFormField<String>(
+                      value: selectedEnjeu,
+                      decoration: const InputDecoration(labelText: "Enjeu"),
+                      items: optionsEnjeux
+                          .map((enjeu) => DropdownMenuItem(
+                              value: enjeu, child: Text(enjeu)))
+                          .toList(),
+                      onChanged: (val) =>
+                          setDialogState(() => selectedEnjeu = val),
+                    ),
+                    const SizedBox(height: 8),
+                    CheckboxListTile(
+                      title: const Text("Prioritaire"),
+                      value: estPrioritaire,
+                      onChanged: (val) =>
+                          setDialogState(() => estPrioritaire = val ?? false),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text("ANNULER"),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final texte = tempController.text.trim();
+                    if (texte.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Le texte est vide.")));
+                      return;
+                    }
+                    if (selectedCategorie == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text("Choisissez une catégorie.")));
+                      return;
+                    }
+
+                    final String nouvelId = _consignesRefGlobal.doc().id;
+                    final nouvelleConsigne = Consigne(
+                      id: nouvelId,
+                      tranche: _selectedTranche!,
+                      contenu: texte,
+                      dateEmission: DateTime.now(),
+                      auteurIdCreation: _currentUser!.uid,
+                      auteurNomPrenomCreation: _currentUserNomPrenom,
+                      roleAuteurCreation: _roleDisplay,
+                      estPrioritaire: estPrioritaire,
+                      categorie: selectedCategorie!,
+                      enjeu: selectedEnjeu,
+                    );
+
+                    await _addConsigneDB(nouvelleConsigne);
+                    if (mounted) Navigator.pop(dialogContext);
+                  },
+                  child: const Text("VALIDER"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _presenterModificationConsigne(Consigne consigne) {
@@ -1211,7 +1313,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final bool peutAjouter = (_userRoles.contains(roleAdminString) ||
             _userRoles.contains(roleChefDeChantierString) ||
-            _userRoles.contains('chef_de_chantier_amcr')) &&
+            _userRoles.contains('chef_de_chantier_amcr') ||
+            _userRoles.contains('referent') ||
+            _userRoles.contains('referent_amcr') ||
+            _userRoles.contains(roleChefEquipeString) ||
+            _userRoles.contains('chef_equipe_amcr') ||
+            _userRoles.contains(roleIntervenantString) ||
+            _userRoles.contains('intervenant_amcr')) &&
         _currentUser != null;
     if (!peutAjouter) {
       String message = "Action non autorisée pour ajouter une consigne.";
@@ -1227,28 +1335,35 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Text("Veuillez saisir le texte de la consigne.")));
       return;
     }
-    String? categorieChoisie = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        return SimpleDialog(
-          title: const Text('Choisir une catégorie pour la consigne'),
-          children: _categoriesConsignes.map((categorie) {
-            return SimpleDialogOption(
-              onPressed: () {
-                Navigator.pop(dialogContext, categorie);
-              },
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 10.0, horizontal: 8.0),
-                child: Text(categorie, style: const TextStyle(fontSize: 16)),
-              ),
-            );
-          }).toList(),
-        );
-      },
-    );
+
+    String? categorieChoisie;
+    if (_interfaceType == 'amcr') {
+      categorieChoisie = "Autre";
+    } else {
+      categorieChoisie = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) {
+          return SimpleDialog(
+            title: const Text('Choisir une catégorie pour la consigne'),
+            children: _categoriesConsignes.map((categorie) {
+              return SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, categorie),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 10.0, horizontal: 8.0),
+                  child: Text(categorie, style: const TextStyle(fontSize: 16)),
+                ),
+              );
+            }).toList(),
+          );
+        },
+      );
+    }
+
     if (!mounted || categorieChoisie == null) return;
+
+    // Étape 2 : Demander si on veut définir un enjeu
     bool veutDefinirEnjeu = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
@@ -1271,57 +1386,56 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         ) ??
         false;
-    if (!mounted) return;
-    String? enjeuFinalPourConsigne;
+
+    String? enjeuFinal;
+
+    // Étape 3 : Si oui, choisir l'enjeu
     if (veutDefinirEnjeu) {
-      final String? enjeuChoisiPopup = await showDialog<String>(
+      enjeuFinal = await showDialog<String>(
         context: context,
-        builder: (BuildContext dialogContextEnjeu) {
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) {
           return SimpleDialog(
-            title: const Text('Sélectionner un enjeu'),
-            children: <Widget>[
-              ...optionsEnjeux.map((String enjeu) {
-                return SimpleDialogOption(
-                  onPressed: () => Navigator.pop(dialogContextEnjeu, enjeu),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Text(enjeu),
-                  ),
-                );
-              }),
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(dialogContextEnjeu, null),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text('Aucun enjeu / Annuler',
-                      style: TextStyle(
-                          fontStyle: FontStyle.italic, color: Colors.grey)),
+            title: const Text("Choisir l'enjeu"),
+            children: optionsEnjeux.map((enjeu) {
+              return SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, enjeu),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 10.0, horizontal: 8.0),
+                  child: Text(enjeu, style: const TextStyle(fontSize: 16)),
                 ),
-              ),
-            ],
+              );
+            }).toList(),
           );
         },
       );
-      if (!mounted) return;
-      if (enjeuChoisiPopup != null) {
-        enjeuFinalPourConsigne = enjeuChoisiPopup;
+    }
+
+    try {
+      final nouvelleConsigne = Consigne(
+        id: _consignesRefGlobal.doc().id,
+        tranche: _selectedTranche!,
+        contenu: texte,
+        dateEmission: DateTime.now(),
+        estPrioritaire: _estPrioritaireNouvelleConsigne,
+        auteurIdCreation: _currentUser!.uid,
+        auteurNomPrenomCreation: _currentUserNomPrenom,
+        roleAuteurCreation: _roleDisplay,
+        categorie: categorieChoisie,
+        enjeu: enjeuFinal,
+        commentairesNonRealisation: [],
+      );
+      await _addConsigneDB(nouvelleConsigne);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text("Erreur lors de l'ajout : $e"),
+              backgroundColor: Colors.red),
+        );
       }
     }
-    final nouvelleConsigne = Consigne(
-      id: _consignesRefGlobal.doc().id,
-      tranche: _selectedTranche!,
-      contenu: texte,
-      dateEmission: DateTime.now(),
-      estPrioritaire: _estPrioritaireNouvelleConsigne,
-      auteurIdCreation: _currentUser!.uid,
-      auteurNomPrenomCreation: _currentUserNomPrenom,
-      roleAuteurCreation: _roleDisplay,
-      categorie: categorieChoisie,
-      enjeu: enjeuFinalPourConsigne,
-      commentairesNonRealisation: [],
-    );
-    await _addConsigneDB(nouvelleConsigne);
-    if (!mounted) return;
   }
 
   Future<void> _enregistrerObservationNonRealisation(
@@ -1543,7 +1657,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _presenterAjoutInfoChantier() {
+  Future<void> _presenterAjoutInfoChantier({String? texteInitial}) async {
     if (_selectedTranche == null || _selectedTranche!.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1565,8 +1679,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final bool peutAjouterInfo = (_userRoles.contains(roleAdminString) ||
             _userRoles.contains(roleChefDeChantierString) ||
-            _userRoles.contains('chef_de_chantier_amcr')) &&
+            _userRoles.contains('chef_de_chantier_amcr') ||
+            _userRoles.contains('referent') ||
+            _userRoles.contains('referent_amcr') ||
+            _userRoles.contains(roleChefEquipeString) ||
+            _userRoles.contains('chef_equipe_amcr') ||
+            _userRoles.contains(roleIntervenantString) ||
+            _userRoles.contains('intervenant_amcr')) &&
         _currentUser != null;
+
     if (!peutAjouterInfo) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1574,28 +1695,48 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
-    final texte = _infoController.text.trim();
+
+    final texte = texteInitial ?? _infoController.text.trim();
     if (texte.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Veuillez saisir le texte de l'information.")));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Le texte ne peut pas être vide.")),
+      );
       return;
     }
-    // On génère un ID Firestore à l'avance
-    final String nouvelId = _infosCollection.doc().id;
 
-    final nouvelleInfo = InfoChantier(
-      id: nouvelId,
-      tranche: _selectedTranche!,
-      contenu: texte,
-      dateEmission: DateTime.now(),
-      auteurIdCreation: _currentUser!.uid,
-      auteurNomPrenomCreation: _currentUserNomPrenom,
-      roleAuteurCreation: _roleDisplay,
-    );
-    _addInfoChantierDB(nouvelleInfo);
-    _infoController.clear();
+    try {
+      final String nouvelId = _infosChantierRefGlobal.doc().id;
+      final nouvelleInfo = InfoChantier(
+        id: nouvelId,
+        tranche: _selectedTranche!,
+        contenu: texte,
+        dateEmission: DateTime.now(),
+        auteurIdCreation: _currentUser!.uid,
+        auteurNomPrenomCreation: _currentUserNomPrenom,
+        roleAuteurCreation: _roleDisplay,
+      );
+
+      await _addInfoChantierDB(nouvelleInfo);
+      _infoController.clear();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Information ajoutée avec succès."),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Erreur lors de l'ajout : $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _confirmerEtSupprimerInfo(
@@ -1880,6 +2021,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _userRoles.contains('client_alog');
     if (isClient) return const SizedBox.shrink();
 
+    // Visible uniquement pour Admin et Chef de chantier
     final bool peutAfficherChampAjout = (_userRoles.contains(roleAdminString) ||
             _userRoles.contains(roleChefDeChantierString) ||
             _userRoles.contains('chef_de_chantier_amcr')) &&
@@ -2013,6 +2155,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _userRoles.contains('client_alog');
     if (isClient) return const SizedBox.shrink();
 
+    // Visible uniquement pour Admin et Chef de chantier
     final bool peutAfficherChampAjoutInfo =
         (_userRoles.contains(roleAdminString) ||
                 _userRoles.contains(roleChefDeChantierString) ||
@@ -2053,7 +2196,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 10),
               ElevatedButton.icon(
                   icon: const Icon(Icons.add_comment_outlined),
-                  onPressed: _presenterAjoutInfoChantier,
+                  onPressed: () => _presenterAjoutInfoChantier(),
                   label: const Text("Ajouter Info"),
                   style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue.shade700,
@@ -2254,7 +2397,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     estLue: estLue,
                     estAuteur: estAuteur,
                     estNouvelleInfo: estNouvelleInfo,
-                    peutModifierInfo: estAuteur, // Seul l'auteur peut modifier
+                    // Seuls Admin et Chef de chantier peuvent modifier, même si on est l'auteur
+                    peutModifierInfo: peutModifierInfo,
                     peutSupprimerInfo: peutSupprimerInfo,
                     peutVoirLectures: peutVoirLectures,
                     onMarquerLue: () => _marquerInfoCommeLue(info),
@@ -2346,7 +2490,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
 
     if (nouvelleTranche != null && nouvelleTranche != _selectedTranche) {
-      _safelySetState(() => _selectedTranche = nouvelleTranche);
+      _safelySetState(() {
+        _selectedTranche = nouvelleTranche;
+        _unvalidatedTransfertsCount = 0;
+        _consignesCache
+            .clear(); // Vider le cache pour forcer le rafraîchissement
+      });
+      _setupTransfertsBadgeListener();
     }
   }
 
@@ -2523,7 +2673,56 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_currentIndex >= stackChildren.length) {
       _currentIndex = 0;
     }
+
+    // --- LOGIQUE DU BOUTON FLOTTANT (FAB) ---
+    // Le FAB est réservé uniquement aux rôles terrain pour faciliter la saisie mobile.
+    // Les Admins et Chefs de chantier utilisent les champs fixes en bas de liste.
+    Widget? fab;
+    final bool estRoleTerrainMobile = (_userRoles.contains('referent') ||
+            _userRoles.contains('referent_amcr') ||
+            _userRoles.contains(roleChefEquipeString) ||
+            _userRoles.contains('chef_equipe_amcr') ||
+            _userRoles.contains(roleIntervenantString) ||
+            _userRoles.contains('intervenant_amcr')) &&
+        !_userRoles.contains(roleAdminString) &&
+        !_userRoles.contains(roleChefDeChantierString) &&
+        !_userRoles.contains('chef_de_chantier_amcr');
+
+    if (estRoleTerrainMobile && _selectedTranche != null) {
+      String label = "";
+      IconData icon = Icons.add;
+      VoidCallback? onPressed;
+
+      Color fabColor = appBarColor; // Par défaut, couleur de l'AppBar
+      final currentLabel = navBarItems[_currentIndex].label;
+
+      if (currentLabel == 'Consignes') {
+        label = "Consigne";
+        onPressed = _presenterAjoutConsigne;
+        // Toujours vert pour les consignes pour une meilleure reconnaissance
+        fabColor = Colors.green.shade700;
+      } else if (currentLabel == 'Infos') {
+        label = "Information";
+        onPressed = _presenterAjoutInfoChantier;
+        // Couleur bleue pour correspondre au bloc Infos
+        if (!_userRoles.contains(roleAdminString)) {
+          fabColor = Colors.blue.shade700;
+        }
+      }
+
+      if (onPressed != null) {
+        fab = FloatingActionButton.extended(
+          onPressed: onPressed,
+          label: Text(label),
+          icon: Icon(icon),
+          backgroundColor: fabColor,
+          foregroundColor: Colors.white,
+        );
+      }
+    }
+
     return Scaffold(
+      floatingActionButton: fab,
       appBar: AppBar(
           title: InkWell(
             onTap: showSwitcher
@@ -2667,11 +2866,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   favoriteTranche: _favoriteTranche,
                   onTrancheSelected: (nouvelleTranche) async {
                     if (nouvelleTranche != _selectedTranche) {
-                      // CRUCIAL : On remet le badge à zéro immédiatement
-                      // pour éviter l'effet "fantôme" pendant le chargement
                       _safelySetState(() {
                         _selectedTranche = nouvelleTranche;
                         _unvalidatedTransfertsCount = 0;
+                        _consignesCache.clear();
                       });
                       _setupTransfertsBadgeListener();
 
@@ -2891,12 +3089,13 @@ class _ConsigneItemWidgetState extends State<ConsigneItemWidget>
 
                       // Ligne méta (auteur + date)
                       Text(
-                        "Créée par ${c.auteurNomPrenomCreation} (${c.roleAuteurCreation}) le ${widget.formatDate(c.dateEmission)}",
+                        "Créé par : ${c.auteurNomPrenomCreation} • ${c.roleAuteurCreation} • ${widget.formatDate(c.dateEmission)}",
                         style: TextStyle(
                           fontSize: 10,
                           color: Colors.grey.shade600,
                           fontStyle: FontStyle.italic,
                         ),
+                        softWrap: true,
                       ),
 
                       const SizedBox(height: 2),
@@ -3223,10 +3422,6 @@ class _ConsignesStreamBuilder extends StatefulWidget {
 
 class _ConsignesStreamBuilderState extends State<_ConsignesStreamBuilder> {
   late Stream<List<Consigne>> _filteredStream;
-
-  bool _hasConsignes = false;
-  bool _hasAMCR = false;
-  bool _hasCAPILog = false;
 
   @override
   void initState() {

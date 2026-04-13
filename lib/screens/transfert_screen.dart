@@ -13,6 +13,8 @@ const String roleAdminString = "administrateur";
 const String roleChefDeChantierString = "chef_de_chantier";
 const String roleChefEquipeString = "chef_equipe";
 const String roleIntervenantString = "intervenant";
+const String roleChefDeChantierAMCRString = "chef_de_chantier_amcr";
+const String roleReferentAMCRString = "referent_amcr";
 
 class _TransfertsCache {
   List<Transfert>? _lastList;
@@ -60,6 +62,7 @@ class TransfertScreen extends StatefulWidget {
   final List<String> userRoles;
   final String currentUserNomPrenom;
   final String roleDisplay;
+  final String interfaceType;
 
   const TransfertScreen({
     super.key,
@@ -68,6 +71,7 @@ class TransfertScreen extends StatefulWidget {
     required this.userRoles,
     required this.currentUserNomPrenom,
     required this.roleDisplay,
+    this.interfaceType = 'consignes',
   });
 
   @override
@@ -82,8 +86,7 @@ class _TransfertScreenState extends State<TransfertScreen> {
   final TextEditingController _observationValidationDialogController =
       TextEditingController();
 
-  final CollectionReference _transfertsRefGlobal =
-      FirebaseFirestore.instance.collection('transferts');
+  late final CollectionReference _transfertsRefGlobal;
 
   final Map<String, TextEditingController> _obsNonRealiseeControllers = {};
   final Map<String, TextEditingController> _obsValidationControllers = {};
@@ -92,6 +95,8 @@ class _TransfertScreenState extends State<TransfertScreen> {
   void initState() {
     super.initState();
     _selectedTranche = widget.selectedTranche;
+    _transfertsRefGlobal = FirebaseFirestore.instance.collection(
+        widget.interfaceType == 'amcr' ? 'amcr_transferts' : 'transferts');
   }
 
   @override
@@ -126,6 +131,7 @@ class _TransfertScreenState extends State<TransfertScreen> {
           allTranches: widget.allTranches,
           currentUserNomPrenom: widget.currentUserNomPrenom,
           roleDisplay: widget.roleDisplay,
+          interfaceType: widget.interfaceType,
         ),
       ),
     );
@@ -140,6 +146,7 @@ class _TransfertScreenState extends State<TransfertScreen> {
           currentUserNomPrenom: widget.currentUserNomPrenom,
           roleDisplay: widget.roleDisplay,
           transfertAEditer: transfert,
+          interfaceType: widget.interfaceType,
         ),
       ),
     );
@@ -723,15 +730,18 @@ class _TransfertScreenState extends State<TransfertScreen> {
                 widget.userRoles.contains(roleIntervenantString)) &&
             FirebaseAuth.instance.currentUser != null;
 
+    final bool estPrivilegie = widget.interfaceType == 'amcr'
+        ? (widget.userRoles.contains(roleAdminString) ||
+            widget.userRoles.contains(roleChefDeChantierAMCRString) ||
+            widget.userRoles.contains(roleReferentAMCRString))
+        : (widget.userRoles.contains(roleAdminString) ||
+            widget.userRoles.contains(roleChefDeChantierString));
+
     final bool peutModifierTransfert =
-        (widget.userRoles.contains(roleAdminString) ||
-                widget.userRoles.contains(roleChefDeChantierString)) &&
-            FirebaseAuth.instance.currentUser != null;
+        estPrivilegie && FirebaseAuth.instance.currentUser != null;
 
     final bool peutSupprimerTransfertNonValidee =
-        (widget.userRoles.contains(roleAdminString) ||
-                widget.userRoles.contains(roleChefDeChantierString)) &&
-            FirebaseAuth.instance.currentUser != null;
+        estPrivilegie && FirebaseAuth.instance.currentUser != null;
 
     return RepaintBoundary(
       child: ListView.builder(
@@ -777,16 +787,25 @@ class _TransfertScreenState extends State<TransfertScreen> {
       );
     }
 
+    final bool peutCreerTransfert = widget.interfaceType == 'amcr'
+        ? (widget.userRoles.contains(roleAdminString) ||
+            widget.userRoles.contains(roleChefDeChantierAMCRString) ||
+            widget.userRoles.contains(roleReferentAMCRString))
+        : (widget.userRoles.contains(roleAdminString) ||
+            widget.userRoles.contains(roleChefDeChantierString));
+
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'fab_transfert_nouveau',
-        onPressed: _presenterAjoutTransfert,
-        backgroundColor: const Color(0xFF102A43),
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Nouveau'),
-      ),
+      floatingActionButton: peutCreerTransfert
+          ? FloatingActionButton.extended(
+              heroTag: 'fab_transfert_nouveau',
+              onPressed: _presenterAjoutTransfert,
+              backgroundColor: const Color(0xFF102A43),
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('Nouveau'),
+            )
+          : null,
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1038,13 +1057,35 @@ class _TransfertItemWidgetState extends State<TransfertItemWidget>
                         ),
                       ),
                       if (t.heureDepart != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          "Planifié : ${widget.formatDate(t.heureDepart, showTime: true)}",
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.blue.shade700,
-                            fontWeight: FontWeight.w500,
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue.shade200),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.access_time_filled,
+                                size: 16,
+                                color: Colors.blue.shade800,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                "PLANIFIÉ : ${widget.formatDate(t.heureDepart, showTime: true)}",
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.blue.shade900,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],

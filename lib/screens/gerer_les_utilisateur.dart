@@ -76,10 +76,15 @@ class _UserListViewState extends State<UserListView> {
   final TextEditingController _searchController = TextEditingController();
   String? _selectedFilterRole;
   final List<String> _roles = const [
-    'chef_de_chantier',
     'administrateur',
+    'chef_de_chantier',
     'chef_equipe',
     'intervenant',
+    'client_alog',
+    'chef_de_chantier_amcr',
+    'referent_amcr',
+    'intervenant_amcr',
+    'client_amcr',
   ];
 
   @override
@@ -334,27 +339,31 @@ class ActiveUserCard extends StatefulWidget {
 }
 
 class _ActiveUserCardState extends State<ActiveUserCard> {
-  late String _selectedRole;
+  late List<String> _selectedRoles;
+  late bool _isAMCR;
+  late bool _isCAPILog;
+  late bool _isConsignes;
   final List<String> _roles = const [
-    'chef_de_chantier',
     'administrateur',
+    'chef_de_chantier',
     'chef_equipe',
     'intervenant',
+    'client_alog',
+    'chef_de_chantier_amcr',
+    'referent_amcr',
+    'intervenant_amcr',
+    'client_amcr',
   ];
-
-  final Map<String, Color> _roleColors = const {
-    'administrateur': Colors.red,
-    'chef_de_chantier': Colors.blue,
-    'chef_equipe': Colors.green,
-    'intervenant': Colors.orange,
-  };
 
   @override
   void initState() {
     super.initState();
     final data = widget.userDocument.data() as Map<String, dynamic>? ?? {};
-    final rolesList = List<String>.from(data['roles'] ?? []);
-    _selectedRole = rolesList.isNotEmpty ? rolesList.first : 'intervenant';
+    _selectedRoles = List<String>.from(data['roles'] ?? []);
+    if (_selectedRoles.isEmpty) _selectedRoles = ['intervenant'];
+    _isAMCR = data['isAMCR'] ?? false;
+    _isCAPILog = data['isCAPILog'] ?? false;
+    _isConsignes = data['isConsignes'] ?? false;
   }
 
   String _displayRole(String role) {
@@ -368,69 +377,113 @@ class _ActiveUserCardState extends State<ActiveUserCard> {
   Widget build(BuildContext context) {
     final data = widget.userDocument.data() as Map<String, dynamic>? ?? {};
     final email = data['email']?.toString() ?? 'Email non disponible';
-    // On récupère le nom et prénom s'ils existent
     final nom = data['nom']?.toString();
     final prenom = data['prenom']?.toString();
     String displayName =
         (nom != null && prenom != null) ? '$prenom $nom' : email;
 
-    final Color roleColor = _roleColors[_selectedRole] ?? Colors.grey;
+    final bool isAdmin = _selectedRoles.contains('administrateur');
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 4.0),
       child: ExpansionTile(
         leading: Icon(
-          _selectedRole == 'administrateur'
-              ? Icons.shield_outlined
-              : Icons.engineering,
-          color: roleColor,
+          isAdmin ? Icons.shield_outlined : Icons.engineering,
+          color: isAdmin ? Colors.red : Colors.blue,
         ),
         title: Text(displayName),
         subtitle: Text(
-            "Rôle : ${_displayRole(_selectedRole)}${displayName != email ? '\n$email' : ''}"),
+            "Rôles : ${_selectedRoles.map(_displayRole).join(', ')}${displayName != email ? '\n$email' : ''}"),
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _selectedRole,
-                    decoration: const InputDecoration(
-                      labelText: 'Changer le rôle',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: _roles
-                        .map((r) => DropdownMenuItem<String>(
-                              value: r,
-                              child: Text(_displayRole(r)),
-                            ))
-                        .toList(),
-                    onChanged: (val) {
-                      if (val != null && val != _selectedRole) {
-                        widget.onUpdate(
-                          widget.userDocument.id,
-                          {
-                            'roles': [val]
-                          },
-                        );
+                const Text('Gérer les rôles :',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8.0,
+                  runSpacing: 4.0,
+                  children: _roles.map((role) {
+                    final isSelected = _selectedRoles.contains(role);
+                    return FilterChip(
+                      label: Text(_displayRole(role),
+                          style: const TextStyle(fontSize: 12)),
+                      selected: isSelected,
+                      selectedColor: Colors.blue.shade100,
+                      onSelected: (bool selected) {
                         setState(() {
-                          _selectedRole = val;
+                          if (selected) {
+                            if (!_selectedRoles.contains(role)) {
+                              _selectedRoles.add(role);
+                            }
+                          } else {
+                            if (_selectedRoles.length > 1) {
+                              _selectedRoles.remove(role);
+                            }
+                          }
                         });
-                      }
-                    },
-                  ),
+                        widget.onUpdate(widget.userDocument.id, {
+                          'roles': _selectedRoles,
+                        });
+                      },
+                    );
+                  }).toList(),
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(left: 16.0),
-                  child: IconButton(
-                    icon:
-                        Icon(Icons.delete_forever, color: Colors.red.shade700),
-                    tooltip: 'Supprimer cet utilisateur',
-                    onPressed: () => widget.onDelete(widget.userDocument.id),
-                  ),
+                const Divider(),
+                SwitchListTile(
+                  title: const Text('Accès Consignes'),
+                  subtitle:
+                      const Text('Autoriser l\'accès à l\'interface Consignes'),
+                  value: _isConsignes,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isConsignes = value;
+                    });
+                    widget.onUpdate(widget.userDocument.id, {
+                      'isConsignes': _isConsignes,
+                    });
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Accès CAPILog'),
+                  subtitle:
+                      const Text('Autoriser l\'accès à l\'interface CAPILog'),
+                  value: _isCAPILog,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isCAPILog = value;
+                    });
+                    widget.onUpdate(widget.userDocument.id, {
+                      'isCAPILog': _isCAPILog,
+                    });
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Accès Interface AMCR'),
+                  subtitle: const Text('Autoriser l\'accès au menu AMCR'),
+                  value: _isAMCR,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isAMCR = value;
+                    });
+                    widget.onUpdate(widget.userDocument.id, {
+                      'isAMCR': _isAMCR,
+                    });
+                  },
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.delete_forever, color: Colors.red),
+                      label: const Text('Supprimer',
+                          style: TextStyle(color: Colors.red)),
+                      onPressed: () => widget.onDelete(widget.userDocument.id),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -457,20 +510,31 @@ class UserValidationCard extends StatefulWidget {
 }
 
 class _UserValidationCardState extends State<UserValidationCard> {
-  late String _selectedRole;
+  late List<String> _selectedRoles;
+  bool _isAMCR = false;
+  bool _isCAPILog = false;
+  bool _isConsignes = false;
   final List<String> _roles = const [
-    'chef_de_chantier',
     'administrateur',
+    'chef_de_chantier',
     'chef_equipe',
     'intervenant',
+    'client_alog',
+    'chef_de_chantier_amcr',
+    'referent_amcr',
+    'intervenant_amcr',
+    'client_amcr',
   ];
 
   @override
   void initState() {
     super.initState();
     final data = widget.userDocument.data() as Map<String, dynamic>? ?? {};
-    final rolesList = List<String>.from(data['roles'] ?? []);
-    _selectedRole = rolesList.isNotEmpty ? rolesList.first : 'intervenant';
+    _selectedRoles = List<String>.from(data['roles'] ?? []);
+    if (_selectedRoles.isEmpty) _selectedRoles = ['intervenant'];
+    _isAMCR = data['isAMCR'] ?? false;
+    _isCAPILog = data['isCAPILog'] ?? false;
+    _isConsignes = data['isConsignes'] ?? false;
   }
 
   String _displayRole(String role) {
@@ -485,60 +549,106 @@ class _UserValidationCardState extends State<UserValidationCard> {
     final data = widget.userDocument.data() as Map<String, dynamic>? ?? {};
     final email = data['email']?.toString() ?? 'Email non disponible';
     final nom = data['nom']?.toString() ?? 'N/A';
+    final prenom = data['prenom']?.toString() ?? 'N/A';
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 4.0),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('$email (Nom: $nom)',
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const Text("En attente de validation",
-                style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: ExpansionTile(
+        title: Text('$prenom $nom',
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: const Text("En attente de validation",
+            style: TextStyle(color: Colors.orange)),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: DropdownButton<String>(
-                    value: _selectedRole,
-                    isExpanded: true,
-                    underline: const SizedBox(),
-                    items: _roles
-                        .map((r) => DropdownMenuItem<String>(
-                              value: r,
-                              child: Text(_displayRole(r)),
-                            ))
-                        .toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() => _selectedRole = val);
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    widget.onValidate(
-                      widget.userDocument.id,
-                      {
-                        'statut': 'valide',
-                        'roles': [_selectedRole],
+                Text('Email: $email'),
+                const SizedBox(height: 8),
+                const Text('Attribuer les rôles :',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8.0,
+                  runSpacing: 4.0,
+                  children: _roles.map((role) {
+                    final isSelected = _selectedRoles.contains(role);
+                    return FilterChip(
+                      label: Text(_displayRole(role),
+                          style: const TextStyle(fontSize: 12)),
+                      selected: isSelected,
+                      onSelected: (bool selected) {
+                        setState(() {
+                          if (selected) {
+                            if (!_selectedRoles.contains(role)) {
+                              _selectedRoles.add(role);
+                            }
+                          } else {
+                            if (_selectedRoles.length > 1) {
+                              _selectedRoles.remove(role);
+                            }
+                          }
+                        });
                       },
                     );
+                  }).toList(),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  title: const Text('Accès Consignes'),
+                  value: _isConsignes,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isConsignes = value;
+                    });
                   },
-                  style:
-                      ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  child: const Text('Valider'),
+                ),
+                SwitchListTile(
+                  title: const Text('Accès CAPILog'),
+                  value: _isCAPILog,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isCAPILog = value;
+                    });
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Accès Interface AMCR'),
+                  value: _isAMCR,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isAMCR = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      widget.onValidate(
+                        widget.userDocument.id,
+                        {
+                          'statut': 'valide',
+                          'roles': _selectedRoles,
+                          'isAMCR': _isAMCR,
+                          'isCAPILog': _isCAPILog,
+                          'isConsignes': _isConsignes,
+                          'isAwaitingValidation': false, // Correction cruciale
+                        },
+                      );
+                    },
+                    style:
+                        ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                    child: const Text('Valider l\'utilisateur',
+                        style: TextStyle(color: Colors.white)),
+                  ),
                 )
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

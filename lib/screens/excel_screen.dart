@@ -7,17 +7,20 @@ import 'package:file_saver/file_saver.dart';
 
 import '../model/consigne.dart';
 import '../model/transfert.dart';
+import '../model/info_chantier.dart';
 import '../model/commentaire.dart';
 
 class ExcelScreen extends StatefulWidget {
   final List<dynamic>
       archives; // Changé en dynamic pour accepter Consigne et Transfert
   final String selectedTranche;
+  final String interfaceType;
 
   const ExcelScreen({
     super.key,
     required this.archives,
     required this.selectedTranche,
+    this.interfaceType = 'consignes',
   });
 
   @override
@@ -45,9 +48,10 @@ class _ExcelScreenState extends State<ExcelScreen> {
   }
 
   Future<void> _showExportDialog() async {
+    final prefix = widget.interfaceType == 'amcr' ? 'AMCR_' : '';
     final fileNameController = TextEditingController(
       text:
-          'Export_Archives_${widget.selectedTranche}_${DateTime.now().toIso8601String().substring(0, 10)}',
+          '${prefix}Export_Archives_${widget.selectedTranche}_${DateTime.now().toIso8601String().substring(0, 10)}',
     );
     final sheetNameController =
         TextEditingController(text: widget.selectedTranche);
@@ -125,9 +129,9 @@ class _ExcelScreenState extends State<ExcelScreen> {
         'Date/Heure Planifiée',
         'Heure Départ Réel',
         'Heure Arrivée Réel',
-        'Validé par',
-        'Date Validation',
-        'Observation (Validation)',
+        'Validé / Lu par',
+        'Date Validation / Lecture',
+        'Observation / Lecteurs détaillés',
         'Dosimétrie (Détail)',
         'Total Dosimétrie (mSv)',
         'Commentaires Non-réalisation'
@@ -165,7 +169,9 @@ class _ExcelScreenState extends State<ExcelScreen> {
         List<Commentaire>? comments;
 
         if (item is Consigne) {
-          type = 'Consigne';
+          type = item.categorie == "Ajout Manuel"
+              ? 'Consigne (Manuelle)'
+              : 'Consigne';
           contenu = item.contenu;
           dateEmission = _formatDateForExcel(item.dateEmission);
           auteurCreation = item.auteurNomPrenomCreation;
@@ -193,6 +199,18 @@ class _ExcelScreenState extends State<ExcelScreen> {
           dosiDetail = item.dosimetrieInfo ?? '';
           dosiTotal = _extractTotalFromDosimetrie(item.dosimetrieInfo);
           comments = item.commentairesNonRealisation;
+        } else if (item is InfoChantier) {
+          type = 'Information';
+          contenu = item.contenu;
+          dateEmission = _formatDateForExcel(item.dateEmission);
+          auteurCreation = item.auteurNomPrenomCreation;
+          roleAuteur = item.roleAuteurCreation;
+          validePar = "${item.lectures.length} lecture(s)";
+          // On liste les lecteurs dans la colonne observation
+          obsVal = item.lectures
+              .map((l) =>
+                  "${l.userNomPrenom} (${_formatDateForExcel(l.dateLecture)})")
+              .join(', ');
         }
 
         commsNonReal = comments

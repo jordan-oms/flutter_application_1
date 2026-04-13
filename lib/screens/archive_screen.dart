@@ -6,6 +6,7 @@ import 'dart:async';
 import '../model/consigne.dart';
 import '../model/transfert.dart';
 import 'excel_screen.dart';
+import 'dosimetrie_dialog.dart';
 
 const String roleAdminString = "administrateur";
 const String roleChefDeChantierString = "chef_de_chantier";
@@ -22,6 +23,11 @@ class ArchiveScreen extends StatefulWidget {
   final Future<void> Function(String) deleteTransfertDB;
   final Map<String, TextEditingController> obsNonRealiseeControllersTransferts;
   final Map<String, TextEditingController> obsValidationControllersTransferts;
+  final String interfaceType;
+  final String? currentUserUid;
+  final String? currentUserNomPrenom;
+  final String? roleDisplay;
+  final Future<void> Function(Consigne) addConsigneDB;
 
   const ArchiveScreen({
     super.key,
@@ -36,6 +42,11 @@ class ArchiveScreen extends StatefulWidget {
     required this.deleteTransfertDB,
     required this.obsNonRealiseeControllersTransferts,
     required this.obsValidationControllersTransferts,
+    required this.addConsigneDB,
+    this.currentUserUid,
+    this.currentUserNomPrenom,
+    this.roleDisplay,
+    this.interfaceType = 'consignes',
   });
 
   @override
@@ -130,6 +141,47 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     return '${parts[2]}/${parts[1]}/${parts[0]} - $shiftName';
   }
 
+  void _confirmDeletion(BuildContext context, String id, bool isConsigne) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 10),
+            Text("Confirmation"),
+          ],
+        ),
+        content: Text(
+            "Êtes-vous sûr de vouloir supprimer définitivement cette ${isConsigne ? 'consigne' : 'archive de transfert'} ? Cette action est irréversible."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("ANNULER"),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              if (isConsigne) {
+                widget.deleteConsigneDB(id);
+              } else {
+                widget.deleteTransfertDB(id);
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Suppression effectuée"),
+                  backgroundColor: Colors.redAccent,
+                ),
+              );
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("SUPPRIMER"),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.selectedTranche == null) {
@@ -209,7 +261,169 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           ),
         ],
       ),
-      floatingActionButton: _buildExcelButton(filteredItems),
+      floatingActionButton: _buildActionButtons(filteredItems),
+    );
+  }
+
+  void _showAddManualArchiveDialog() {
+    final TextEditingController contentController = TextEditingController();
+    final TextEditingController observationController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.history_edu, color: Colors.orange),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "Ajout Manuel Archive",
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Décrivez l'activité réalisée qui n'était pas prévue dans les consignes initiales.",
+                style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: contentController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: "Activité réalisée *",
+                  hintText: "Ex: Nettoyage zone hors planning...",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: observationController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: "Observation (Optionnelle)",
+                  hintText: "Détails complémentaires...",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("ANNULER"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            onPressed: () {
+              final content = contentController.text.trim();
+              if (content.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Le contenu est obligatoire.")),
+                );
+                return;
+              }
+              Navigator.pop(context);
+              _proceedToDosimetrie(content, observationController.text.trim());
+            },
+            child: const Text("SUIVANT : DOSIMÉTRIE"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _proceedToDosimetrie(String content, String observation) {
+    // Création d'une consigne "fantôme" pour le dialogue de dosimétrie
+    final draftConsigne = Consigne(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      tranche: widget.selectedTranche!,
+      contenu: content,
+      dateEmission: DateTime.now(),
+      estPrioritaire: false,
+      auteurIdCreation: widget.currentUserUid ?? "inconnu",
+      auteurNomPrenomCreation: widget.currentUserNomPrenom ?? "Anonyme",
+      roleAuteurCreation: widget.roleDisplay ?? "Utilisateur",
+      categorie: "Ajout Manuel",
+      estValidee: true,
+      dateValidation: DateTime.now(),
+      idAuteurValidation: widget.currentUserUid,
+      nomPrenomValidation: widget.currentUserNomPrenom,
+      commentaireValidation: observation.isNotEmpty ? observation : null,
+    );
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => DosimetrieDialog(
+        consigneAValider: draftConsigne,
+        commentaireInitial: observation,
+        currentUserUid: widget.currentUserUid ?? "inconnu",
+        onUpdateConsigne: (consigneFinale) async {
+          await widget.addConsigneDB(consigneFinale);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Archive ajoutée avec succès !"),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  Widget? _buildActionButtons(List<dynamic> items) {
+    final bool isClient = widget.userRoles.contains('client') ||
+        widget.userRoles.contains('client_amcr') ||
+        widget.userRoles.contains('client_alog');
+    final bool isPrivileged = widget.userRoles.contains(roleAdminString) ||
+        widget.userRoles.contains(roleChefDeChantierString);
+
+    if (isClient) return null;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FloatingActionButton(
+          heroTag: "addArchive",
+          backgroundColor: Colors.orange.shade700,
+          onPressed: _showAddManualArchiveDialog,
+          tooltip: "Ajouter une archive à la main",
+          child: const Icon(Icons.add, color: Colors.white),
+        ),
+        if (isPrivileged) ...[
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: "excelExport",
+            backgroundColor: widget.interfaceType == 'amcr'
+                ? Colors.blueGrey.shade700
+                : Colors.green[700],
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ExcelScreen(
+                    archives: items,
+                    selectedTranche: widget.selectedTranche!,
+                    interfaceType: widget.interfaceType,
+                  ),
+                ),
+              );
+            },
+            child: const Icon(Icons.grid_on, color: Colors.white),
+          ),
+        ],
+      ],
     );
   }
 
@@ -274,29 +488,47 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 0,
+      color: widget.interfaceType == 'amcr'
+          ? Colors.blueGrey.shade50
+          : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
+        side: BorderSide(
+            color: widget.interfaceType == 'amcr'
+                ? Colors.blueGrey.shade100
+                : Colors.grey.shade200),
       ),
       child: ExpansionTile(
         shape: const Border(),
         title: Row(
           children: [
-            const Icon(Icons.calendar_today_outlined,
-                size: 20, color: Colors.teal),
+            Icon(Icons.calendar_today_outlined,
+                size: 20,
+                color: widget.interfaceType == 'amcr'
+                    ? Colors.blueGrey
+                    : Colors.teal),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${_formatDateAndShiftFromKey(key)} (Total dosimétrie: ${totalDosi.toStringAsFixed(3)} mSv)',
+                    _formatDateAndShiftFromKey(key),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                       color: Colors.black87,
                     ),
                   ),
+                  if (totalDosi > 0)
+                    Text(
+                      'Total dosimétrie: ${totalDosi.toStringAsFixed(3)} mSv',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
                   const SizedBox(height: 2),
                   Text(
                     '$nbConsignes Consigne(s) - $nbTransferts Transfert(s)',
@@ -386,7 +618,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         trailing: widget.userRoles.contains(roleAdminString)
             ? IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: () => widget.deleteConsigneDB(c.id))
+                onPressed: () => _confirmDeletion(context, c.id, true))
             : null,
       ),
     );
@@ -417,6 +649,35 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (t.heureDepart != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 2),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.blue.shade100),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.access_time_filled,
+                          size: 14, color: Colors.blue.shade700),
+                      const SizedBox(width: 6),
+                      Text(
+                        "PLANIFIÉ : ${DateFormat('dd/MM/yyyy HH:mm').format(t.heureDepart!)}",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.blue.shade900,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             const SizedBox(height: 4),
             Text(
                 "Créé par: ${t.auteurNomPrenomCreation} le ${_formatDateSimple(t.dateEmission)}",
@@ -459,7 +720,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         trailing: widget.userRoles.contains(roleAdminString)
             ? IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: () => widget.deleteTransfertDB(t.id))
+                onPressed: () => _confirmDeletion(context, t.id, false))
             : null,
       ),
     );
@@ -469,7 +730,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     if (!(widget.userRoles.contains(roleAdminString) ||
         widget.userRoles.contains(roleChefDeChantierString))) return null;
     return FloatingActionButton(
-      backgroundColor: Colors.green[700],
+      backgroundColor: widget.interfaceType == 'amcr'
+          ? Colors.blueGrey.shade700
+          : Colors.green[700],
       child: const Icon(Icons.grid_on, color: Colors.white),
       onPressed: () {
         Navigator.push(
@@ -477,7 +740,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             MaterialPageRoute(
                 builder: (context) => ExcelScreen(
                     archives: items,
-                    selectedTranche: widget.selectedTranche!)));
+                    selectedTranche: widget.selectedTranche!,
+                    interfaceType: widget.interfaceType)));
       },
     );
   }

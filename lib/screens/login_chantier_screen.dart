@@ -268,31 +268,11 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
                               ),
                             ),
                       const SizedBox(height: 15),
-                      // ...
-                      const Divider(),
-                      TextButton.icon(
-                        icon: const Icon(Icons.visibility_outlined),
-                        label: const Text("Accéder en Lecture Seule"),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.blueGrey.shade700,
-                        ),
-                        onPressed: () {
-                          // C'est ici que la modification a lieu
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              // On passe directement à HomeScreen avec le mode lecture seule activé
-                              builder: (context) =>
-                                  const HomeScreen(isReadOnly: true),
-                            ),
-                          );
-                        },
-                      ),
-                      const Divider(),
-// ...
                       const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        spacing: 10,
+                        runSpacing: 10,
                         children: [
                           TextButton(
                             onPressed: _forgotPassword,

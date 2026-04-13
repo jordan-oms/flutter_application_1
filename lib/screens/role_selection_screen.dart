@@ -66,14 +66,30 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
       if (!mounted) return;
       final data = userDoc.data();
       final roles = data != null ? data['roles'] as List<dynamic>? : null;
+      final isAMCR = data != null ? data['isAMCR'] == true : false;
 
-      if (userDoc.exists && roles != null && roles.isNotEmpty) {
+      if (userDoc.exists) {
+        final data = userDoc.data()!;
+        final roles = List<String>.from(data['roles'] ?? []);
+        final bool isAdmin = roles.contains('administrateur');
+        final bool isAMCRAuthorized = data['isAMCR'] == true;
+        final bool isConsignesAuthorized = data['isConsignes'] == true;
+
+        // Déterminer l'interface par défaut
+        String interfaceType = 'consignes';
+
+        // Si l'utilisateur a l'autorisation AMCR mais PAS les consignes (et n'est pas admin)
+        if (isAMCRAuthorized && !isConsignesAuthorized && !isAdmin) {
+          interfaceType = 'amcr';
+        }
+
         Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(
               builder: (_) => HomeScreen(
                 userId: currentUser.uid,
-                initialTranche: userDoc.data()?['favoriteTranche'],
+                initialTranche: data['favoriteTranche'],
+                interfaceType: interfaceType,
               ),
             ),
             (Route<dynamic> route) => false);
@@ -88,7 +104,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
     }
   }
 
-  Future<void> _startLoginProcess() async {
+  Future<void> _startLoginProcess({String interfaceType = 'consignes'}) async {
     if (_isProcessingLogin) return;
     setState(() => _isProcessingLogin = true);
 
@@ -114,15 +130,49 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
         if (!mounted) return;
 
         final data = userDoc.data();
-        final favoriteTranche =
-            (userDoc.exists && data != null) ? data['favoriteTranche'] : null;
+        final roles = List<String>.from(data?['roles'] ?? []);
+        final bool isAdmin = roles.contains('administrateur');
+        final bool isAMCRAuthorized = data?['isAMCR'] == true;
+        final bool isConsignesAuthorized = data?['isConsignes'] == true;
+
+        // --- VÉRIFICATION STRICTE DES DROITS ---
+        if (interfaceType == 'consignes' &&
+            !isConsignesAuthorized &&
+            !isAdmin) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    "Accès refusé : L'administrateur ne vous a pas autorisé l'accès aux Consignes."),
+                backgroundColor: Colors.red,
+              ),
+            );
+            setState(() => _isProcessingLogin = false);
+          }
+          return;
+        }
+
+        if (interfaceType == 'amcr' && !isAMCRAuthorized && !isAdmin) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    "Accès refusé : L'administrateur ne vous a pas autorisé l'accès AMCR."),
+                backgroundColor: Colors.red,
+              ),
+            );
+            setState(() => _isProcessingLogin = false);
+          }
+          return;
+        }
 
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(
             builder: (_) => HomeScreen(
               userId: currentUser.uid,
-              initialTranche: favoriteTranche,
+              initialTranche: data?['favoriteTranche'],
+              interfaceType: interfaceType,
             ),
           ),
           (Route<dynamic> route) => false,
@@ -203,6 +253,42 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
                                 if (loginSuccess == true) {
                                   if (!mounted) return;
+
+                                  // VÉRIFICATION STRICTE POUR CAPILog
+                                  final currentUser =
+                                      FirebaseAuth.instance.currentUser;
+                                  if (currentUser != null) {
+                                    final userDoc = await fs
+                                        .FirebaseFirestore.instance
+                                        .collection('utilisateurs')
+                                        .doc(currentUser.uid)
+                                        .get();
+
+                                    if (userDoc.exists) {
+                                      final data = userDoc.data()!;
+                                      final roles = List<String>.from(
+                                          data['roles'] ?? []);
+                                      final bool isAdmin =
+                                          roles.contains('administrateur');
+                                      final bool hasCAPILog =
+                                          data['isCAPILog'] == true;
+
+                                      if (!isAdmin && !hasCAPILog) {
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                  "Accès refusé : L'administrateur ne vous a pas autorisé l'accès CAPILog."),
+                                              backgroundColor: Colors.red,
+                                            ),
+                                          );
+                                        }
+                                        return;
+                                      }
+                                    }
+                                  }
+
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
@@ -230,7 +316,8 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
                             // --- LOGO DROITE (Consignes) ---
                             GestureDetector(
-                              onTap: _startLoginProcess,
+                              onTap: () => _startLoginProcess(
+                                  interfaceType: 'consignes'),
                               child: Tooltip(
                                 message:
                                     'Authentification requise pour Consignes',
@@ -250,15 +337,10 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
                         // --- NOUVEAU LOGO AMCR (Centré en dessous) ---
                         GestureDetector(
-                          onTap: () {
-                            // Action future pour AMCR
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text("Projet AMCR à venir...")),
-                            );
-                          },
+                          onTap: () =>
+                              _startLoginProcess(interfaceType: 'amcr'),
                           child: Tooltip(
-                            message: 'Futur projet AMCR',
+                            message: 'Accès interface AMCR',
                             child: Image.asset(
                               'assets/images/AMCR.png',
                               // Assurez-vous que l'image est dans vos assets

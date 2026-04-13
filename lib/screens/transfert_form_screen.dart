@@ -11,6 +11,7 @@ class TransfertFormScreen extends StatefulWidget {
   final String currentUserNomPrenom;
   final String roleDisplay;
   final Transfert? transfertAEditer;
+  final String interfaceType;
 
   const TransfertFormScreen({
     super.key,
@@ -19,6 +20,7 @@ class TransfertFormScreen extends StatefulWidget {
     required this.currentUserNomPrenom,
     required this.roleDisplay,
     this.transfertAEditer,
+    this.interfaceType = 'consignes',
   });
 
   @override
@@ -52,12 +54,14 @@ class _TransfertFormScreenState extends State<TransfertFormScreen> {
     'AUTRE',
   ];
 
-  final CollectionReference _transfertsRefGlobal =
-      FirebaseFirestore.instance.collection('transferts');
+  late final CollectionReference _transfertsRefGlobal;
 
   @override
   void initState() {
     super.initState();
+    _transfertsRefGlobal = FirebaseFirestore.instance.collection(
+        widget.interfaceType == 'amcr' ? 'amcr_transferts' : 'transferts');
+
     if (widget.transfertAEditer != null) {
       _transfertController.text = widget.transfertAEditer!.contenu;
       _lieuDepart = widget.transfertAEditer!.lieuDepart;

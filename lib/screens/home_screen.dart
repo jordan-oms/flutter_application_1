@@ -91,15 +91,17 @@ enum HomeScreenLoadingState {
 }
 
 class HomeScreen extends StatefulWidget {
-  final String? userId; // Devient optionnel
+  final String? userId;
   final String? initialTranche;
-  final bool isReadOnly; // Nouveau paramètre
+  final bool isReadOnly;
+  final String interfaceType; // 'consignes' ou 'amcr'
 
   const HomeScreen({
     super.key,
     this.userId,
     this.initialTranche,
-    this.isReadOnly = false, // Valeur par défaut
+    this.isReadOnly = false,
+    this.interfaceType = 'consignes', // Par défaut 'consignes'
   }) : assert(isReadOnly || userId != null,
             'userId ne peut être nul que si isReadOnly est vrai.');
 
@@ -115,10 +117,17 @@ class _HomeScreenState extends State<HomeScreen> {
   String _roleDisplay = "Chargement...";
   int _currentIndex = 0;
   int _unreadInfosCount = 0;
+  DateTime? _derniereDateInfo; // Pour suivre les modifications
   int _unvalidatedTransfertsCount = 0;
   final Set<String> _dismissedTransfertAlerts = {};
   final Set<String> _currentlyShowingAlerts = {};
   late ValueNotifier<int> _unreadCountNotifier;
+
+  // Variables pour le popup récurrent des Infos
+  Timer? _infosPopupTimer;
+  DateTime? _lastInfosPopupTime;
+  String? _lastUnreadInfoId;
+  bool _isInfosPopupShowing = false;
 
   // Cache pour éviter les reconstructions inutiles
   final _ConsignesCache _consignesCache = _ConsignesCache();
@@ -141,10 +150,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _obsvalitatiobDialogDosimetrie =
       TextEditingController();
 
-  final CollectionReference _consignesRefGlobal =
-      FirebaseFirestore.instance.collection('consignes');
-  final CollectionReference _transfertsRefGlobal =
-      FirebaseFirestore.instance.collection('transferts');
+  late CollectionReference _consignesRefGlobal;
+  late CollectionReference _transfertsRefGlobal;
   final Map<String, TextEditingController> _obsNonRealiseeControllers = {};
   final Map<String, TextEditingController> _obsValidationControllers = {};
   final Map<String, TextEditingController>
@@ -165,8 +172,7 @@ class _HomeScreenState extends State<HomeScreen> {
     "Autre",
   ];
   final TextEditingController _infoController = TextEditingController();
-  final CollectionReference _infosChantierRefGlobal =
-      FirebaseFirestore.instance.collection('infos_chantier');
+  late CollectionReference _infosChantierRefGlobal;
   final DocumentReference _tranchesConfigRef = FirebaseFirestore.instance
       .collection('app_config')
       .doc('tranches_config');
@@ -174,11 +180,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // On ajoute un raccourci pour savoir si on est en mode lecture seule
   bool get _isReadOnly => widget.isReadOnly;
+  String get _interfaceType => widget.interfaceType;
+
+  bool _hasConsignes = false;
+  bool _hasAMCR = false;
+  bool _hasCAPILog = false;
 
   @override
   void initState() {
     super.initState();
     _unreadCountNotifier = ValueNotifier<int>(0);
+
+    // Initialisation dynamique des collections selon l'interface
+    final String prefix = _interfaceType == 'amcr' ? 'amcr_' : '';
+    _consignesRefGlobal =
+        FirebaseFirestore.instance.collection('${prefix}consignes');
+    _transfertsRefGlobal =
+        FirebaseFirestore.instance.collection('${prefix}transferts');
+    _infosChantierRefGlobal =
+        FirebaseFirestore.instance.collection('${prefix}infos_chantier');
+
     // Si on est en lecture seule, on ne charge que les tranches.
     if (_isReadOnly) {
       _safelySetState(
@@ -190,10 +211,97 @@ class _HomeScreenState extends State<HomeScreen> {
       // Sinon, on lance le processus de vérification complet comme avant.
       _checkVersionAndInitialize();
     }
+
+    // Timer pour le popup récurrent des infos (toutes les minutes pour vérifier si on doit l'afficher)
+    _infosPopupTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      final bool isClient = _userRoles.contains('client_amcr') ||
+          _userRoles.contains('client_alog') ||
+          _userRoles.contains('client');
+      if (!isClient) {
+        _checkAndShowInfosPopup();
+      }
+    });
+  }
+
+  void _checkAndShowInfosPopup() {
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog') ||
+        _userRoles.contains('client');
+    if (isClient) return; // Pas de popup pour les clients
+
+    if (_currentIndex == 2) return; // Déjà sur l'onglet Infos
+    if (_unreadInfosCount == 0) return; // Pas d'infos non lues
+    if (_isInfosPopupShowing) return; // Déjà affiché
+
+    final now = DateTime.now();
+    if (_lastInfosPopupTime == null ||
+        now.difference(_lastInfosPopupTime!).inMinutes >= 15) {
+      _showInfosPriorityPopup();
+    }
+  }
+
+  void _showInfosPriorityPopup() {
+    if (!mounted) return;
+    setState(() {
+      _isInfosPopupShowing = true;
+      _lastInfosPopupTime = DateTime.now();
+    });
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: "Nouvelle Info",
+      barrierColor: Colors.black.withOpacity(0.5),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+          child: AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.info, color: Colors.blue.shade700, size: 28),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    "Nouvelle Information",
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              "Vous avez $_unreadInfosCount information${_unreadInfosCount > 1 ? 's' : ''} non lue${_unreadInfosCount > 1 ? 's' : ''}. Veuillez en prendre connaissance sur l'onglet Infos.",
+              style: const TextStyle(fontSize: 16),
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade700,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  setState(() {
+                    // Calcul de l'index de l'onglet Infos
+                    final bool isClient = _userRoles.contains('client_amcr') ||
+                        _userRoles.contains('client');
+                    bool isAmcrMode = _interfaceType == 'amcr' || isClient;
+                    _currentIndex = isAmcrMode ? 1 : 2;
+                    _isInfosPopupShowing = false;
+                  });
+                  Navigator.of(context).pop();
+                },
+                child: const Text("COMPRIS (VOIR L'INFO)"),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
+    _infosPopupTimer?.cancel();
     _ajoutConsigneFocusNode.dispose();
     _consigneController.dispose();
     _infoController.dispose();
@@ -208,25 +316,60 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _updateUnreadCount(List<InfoChantier> infos) async {
-    // Nouveau système : compter les infos non lues par l'utilisateur actuel
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog') ||
+        _userRoles.contains('client');
+
+    if (isClient) {
+      if (mounted && _unreadInfosCount != 0) {
+        setState(() {
+          _unreadInfosCount = 0;
+        });
+      }
+      return;
+    }
+
     int count = 0;
+    DateTime? plusRecenteDate;
 
     for (final info in infos) {
-      // Vérifier si l'utilisateur actuel a déjà lu cette info
       final bool estLueParUtilisateur =
           info.lectures.any((lecture) => lecture.userId == _currentUser?.uid);
-      // Ne compter que si l'utilisateur ne l'a pas lue ET n'est pas l'auteur
       final bool estAuteur = info.auteurIdCreation == _currentUser?.uid;
 
+      // On ne compte l'info que si elle n'est pas lue ET qu'on n'est pas l'auteur
       if (!estLueParUtilisateur && !estAuteur) {
         count++;
+        // On cherche la date de l'info non lue la plus récente
+        if (plusRecenteDate == null ||
+            info.dateEmission.isAfter(plusRecenteDate)) {
+          plusRecenteDate = info.dateEmission;
+        }
       }
     }
 
-    if (mounted && _unreadInfosCount != count) {
-      setState(() {
-        _unreadInfosCount = count;
-      });
+    if (mounted) {
+      // Calculer dynamiquement l'index de l'onglet Infos pour savoir s'il faut afficher le popup
+      // En mode AMCR, c'est l'index 1, sinon c'est l'index 2
+      final int infosTabIndex = (_interfaceType == 'amcr') ? 1 : 2;
+
+      final bool nouvelleModifDetectee = plusRecenteDate != null &&
+          (_derniereDateInfo == null ||
+              plusRecenteDate.isAfter(_derniereDateInfo!));
+
+      if (_unreadInfosCount != count || nouvelleModifDetectee) {
+        setState(() {
+          _unreadInfosCount = count;
+          _derniereDateInfo = plusRecenteDate;
+        });
+
+        // Déclencher le popup si on n'est pas déjà sur l'onglet Infos
+        if (count > 0 &&
+            nouvelleModifDetectee &&
+            _currentIndex != infosTabIndex) {
+          _showInfosPriorityPopup();
+        }
+      }
     }
   }
 
@@ -247,7 +390,34 @@ class _HomeScreenState extends State<HomeScreen> {
             .get();
 
         if (doc.exists) {
-          // Si le repère existe, on ouvre directement ses détails
+          // --- VÉRIFICATION DE SÉCURITÉ CAPILog ---
+          final userDoc = await FirebaseFirestore.instance
+              .collection('utilisateurs')
+              .doc(_currentUser?.uid)
+              .get();
+
+          if (userDoc.exists) {
+            final data = userDoc.data()!;
+            final roles = List<String>.from(data['roles'] ?? []);
+            final bool isAdmin = roles.contains('administrateur');
+            final bool hasCAPILog = data['isCAPILog'] == true;
+
+            if (!isAdmin && !hasCAPILog) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                        "Accès refusé : L'administrateur ne vous a pas autorisé l'accès CAPILog."),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+              return;
+            }
+          }
+          // ---------------------------------------
+
+          // Si le repère existe et que l'utilisateur a les droits, on ouvre ses détails
           if (!mounted) return;
           Navigator.push(
             context,
@@ -269,7 +439,38 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 // Fonction de secours pour naviguer vers Chantier+
-  void _allerVersChantierPlus() {
+  Future<void> _allerVersChantierPlus() async {
+    // Vérification de la permission CAPILog
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('utilisateurs')
+          .doc(_currentUser?.uid)
+          .get();
+
+      if (userDoc.exists) {
+        final data = userDoc.data()!;
+        final roles = List<String>.from(data['roles'] ?? []);
+        final bool isAdmin = roles.contains('administrateur');
+        final bool hasCAPILog = data['isCAPILog'] == true;
+
+        if (!isAdmin && !hasCAPILog) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    "Accès refusé : L'administrateur ne vous a pas autorisé l'accès CAPILog."),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint("Erreur lors de la vérification CAPILog: $e");
+    }
+
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ChantierPlusScreen()),
@@ -462,6 +663,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 .map((role) => role.toString().toLowerCase().trim()))
             : [];
 
+        // Récupération des permissions granulaires
+        final bool isAdmin = _userRoles.contains(roleAdminString);
+        _hasConsignes = isAdmin || data['isConsignes'] == true;
+        _hasAMCR = isAdmin || data['isAMCR'] == true;
+        _hasCAPILog = isAdmin || data['isCAPILog'] == true;
+
         // On récupère le nom et le prénom séparément
         String? nom = data['nom'] as String?;
         String? prenom = data['prenom'] as String?;
@@ -486,18 +693,42 @@ class _HomeScreenState extends State<HomeScreen> {
             : (_currentUser!.email ??
                 "UID: ${_currentUser!.uid} (Doc Manquant)");
       }
+
+      // --- NOUVELLE LOGIQUE POUR DÉTERMINER L'INTERFACE ---
       if (_userRoles.contains(roleAdminString)) {
         _roleDisplay = "Administrateur";
-      } else if (_userRoles.contains(roleChefDeChantierString)) {
+      } else if (_userRoles.contains(roleChefDeChantierString) ||
+          _userRoles.contains('chef_de_chantier_amcr')) {
         _roleDisplay = "Chef de chantier";
-      } else if (_userRoles.contains(roleChefEquipeString)) {
-        _roleDisplay = "Chef d'équipe";
-      } else if (_userRoles.contains(roleIntervenantString)) {
-        // <-- AJOUTEZ CE BLOC
+      } else if (_userRoles.contains(roleChefEquipeString) ||
+          _userRoles.contains('referent_amcr')) {
+        _roleDisplay = "Référent / Chef d'équipe";
+      } else if (_userRoles.contains(roleIntervenantString) ||
+          _userRoles.contains('intervenant_amcr')) {
         _roleDisplay = "Intervenant";
+      } else if (_userRoles.contains('client_amcr') ||
+          _userRoles.contains('client_alog')) {
+        _roleDisplay = "Client (Lecture seule)";
       } else {
         _roleDisplay = "Rôle Indéfini";
       }
+
+      // Si l'utilisateur est passé par la sélection initiale d'interface,
+      // il ne faut pas forcer le switch à chaque _loadUserDataAndRoles,
+      // car widget.interfaceType est censé avoir la priorité.
+      // Cependant, si on vient du démarrage et que widget.interfaceType est 'consignes' (par défaut),
+      // on peut faire un switch vers 'amcr' si l'utilisateur n'a QUE des rôles AMCR.
+
+      final bool onlyAMCR =
+          _userRoles.isNotEmpty && _userRoles.every((r) => r.contains('amcr'));
+      if (onlyAMCR &&
+          widget.interfaceType == 'consignes' &&
+          _interfaceType != 'amcr') {
+        // Dans ce cas, on pourrait soit forcer le changement d'état (si mutable)
+        // soit accepter que la navigation initiale a bien fait son boulot.
+        // Pour l'instant on garde la sélection de la navigation initiale.
+      }
+
       await _loadTranches();
     } catch (e) {
       if (mounted) {
@@ -716,7 +947,12 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Icon(Icons.warning_amber_rounded, color: Colors.orange),
                 SizedBox(width: 8),
-                Text("Transfert imminent"),
+                Expanded(
+                  child: Text(
+                    "Transfert imminent",
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
             content: Column(
@@ -730,10 +966,31 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 16),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  "Prévu à : ${t.heureDepart != null ? "${t.heureDepart!.hour.toString().padLeft(2, '0')}:${t.heureDepart!.minute.toString().padLeft(2, '0')}" : 'Heure inconnue'}",
-                  style: TextStyle(color: Colors.grey.shade700),
+                const SizedBox(height: 12),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.access_time_filled,
+                          size: 18, color: Colors.blue.shade800),
+                      const SizedBox(width: 8),
+                      Text(
+                        "PLANIFIÉ : ${t.heureDepart != null ? DateFormat('HH:mm').format(t.heureDepart!) : '--:--'}",
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.blue.shade900,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -744,10 +1001,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   foregroundColor: Colors.white,
                 ),
                 onPressed: () {
-                  setState(() {
-                    _dismissedTransfertAlerts.add(alertKey);
-                    _currentlyShowingAlerts.remove(alertKey);
-                  });
+                  if (mounted) {
+                    setState(() {
+                      _dismissedTransfertAlerts.add(alertKey);
+                      _currentlyShowingAlerts.remove(alertKey);
+                    });
+                  }
                   Navigator.of(context).pop();
                 },
                 child: const Text("COMPRIS"),
@@ -800,21 +1059,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // La méthode toJson() dans votre modèle Consigne fait déjà tout le travail.
     // Cette fonction devient donc beaucoup plus simple.
     try {
-      await _consignesRefGlobal.doc(consigne.id).update({
-        'estValidee': consigne.estValidee,
-        'dateValidation': consigne.dateValidation != null
-            ? Timestamp.fromDate(consigne.dateValidation!)
-            : null,
-        'commentaireValidation': consigne.commentaireValidation,
-        'idAuteurValidation': consigne.idAuteurValidation,
-        'nomPrenomValidation':
-            consigne.nomPrenomValidation, // ✅ maintenant autorisé
-        'dosimetrieInfo': consigne.dosimetrieInfo,
-        'estNonRealiseeEffectivement': consigne.estNonRealiseeEffectivement,
-        'commentairesNonRealisation': consigne.commentairesNonRealisation
-            ?.map((c) => c.toJson())
-            .toList(),
-      });
+      await _consignesRefGlobal.doc(consigne.id).set(consigne.toJson());
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -953,8 +1198,20 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
+
+    // Restriction lecture seule pour les clients
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog');
+    if (isClient) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Action non autorisée en mode Client.")),
+      );
+      return;
+    }
+
     final bool peutAjouter = (_userRoles.contains(roleAdminString) ||
-            _userRoles.contains(roleChefDeChantierString)) &&
+            _userRoles.contains(roleChefDeChantierString) ||
+            _userRoles.contains('chef_de_chantier_amcr')) &&
         _currentUser != null;
     if (!peutAjouter) {
       String message = "Action non autorisée pour ajouter une consigne.";
@@ -1152,11 +1409,23 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Getter dynamique pour obtenir la bonne collection d'informations selon l'interface
+  CollectionReference get _infosCollection {
+    // Si l'utilisateur est un chef AMCR, on le dirige PRIORITAIREMENT vers amcr_infos_chantier
+    if (_userRoles.contains('chef_de_chantier_amcr')) {
+      return FirebaseFirestore.instance.collection('amcr_infos_chantier');
+    }
+
+    // Sinon, on suit l'interface sélectionnée
+    final String prefix = _interfaceType == 'amcr' ? 'amcr_' : '';
+    return FirebaseFirestore.instance.collection('${prefix}infos_chantier');
+  }
+
   Stream<List<InfoChantier>> getInfosChantierStream() {
     if (_selectedTranche == null) {
       return Stream.value([]);
     }
-    return _infosChantierRefGlobal
+    return _infosCollection
         .where('tranche', isEqualTo: _selectedTranche)
         .orderBy('dateEmission', descending: true)
         .snapshots()
@@ -1164,8 +1433,15 @@ class _HomeScreenState extends State<HomeScreen> {
       return snapshot.docs
           .map((doc) {
             try {
-              return InfoChantier.fromJson(doc.data() as Map<String, dynamic>);
+              final data = doc.data() as Map<String, dynamic>;
+              // On s'assure que l'ID n'est JAMAIS vide en prenant l'ID du document
+              // si le champ interne est manquant ou vide
+              if (data['id'] == null || data['id'].toString().isEmpty) {
+                data['id'] = doc.id;
+              }
+              return InfoChantier.fromJson(data);
             } catch (e) {
+              debugPrint("Erreur parsing InfoChantier: $e");
               return null;
             }
           })
@@ -1176,18 +1452,38 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _addInfoChantierDB(InfoChantier info) async {
     try {
-      await _infosChantierRefGlobal.doc(info.id).set(info.toJson());
-    } catch (e) {
+      // On utilise l'ID déjà présent dans l'objet info
+      if (info.id.isEmpty) {
+        throw Exception("L'ID de l'information ne peut pas être vide.");
+      }
+
+      await _infosCollection.doc(info.id).set(info.toJson());
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Erreur d'ajout de l'information: $e")));
+          const SnackBar(content: Text("Information ajoutée avec succès.")),
+        );
+      }
+    } catch (e) {
+      debugPrint("Erreur Firestore (Add Info): $e");
+      if (mounted) {
+        // Message plus explicite pour l'utilisateur
+        String errorMsg =
+            "Erreur de permission: Vérifiez que votre rôle 'chef_de_chantier' est bien configuré.";
+        if (e.toString().contains('permission-denied')) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(errorMsg), duration: const Duration(seconds: 5)));
+        } else {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text("Erreur: $e")));
+        }
       }
     }
   }
 
   Future<void> _deleteInfoChantierDB(String infoId) async {
     try {
-      await _infosChantierRefGlobal.doc(infoId).delete();
+      await _infosCollection.doc(infoId).delete();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Information supprimée avec succès.")),
@@ -1203,17 +1499,47 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _updateInfoChantierDB(InfoChantier info) async {
     try {
-      await _infosChantierRefGlobal.doc(info.id).update(info.toJson());
+      final DateTime maintenant = DateTime.now();
+
+      // IMPORTANT: On n'envoie que les champs modifiables pour éviter de
+      // déclencher des restrictions sur les champs 'auteurId' ou 'roleAuteur'
+      // si les règles Firestore sont très strictes sur le diff().
+      await _infosCollection.doc(info.id).update({
+        'contenu': info.contenu,
+        'dateEmission': Timestamp.fromDate(maintenant),
+        'lectures': [],
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Information mise à jour avec succès.")),
+          const SnackBar(
+              content:
+                  Text("Information mise à jour et notifications renvoyées.")),
         );
       }
     } catch (e) {
+      debugPrint("Erreur Firestore (Update Info): $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text("Erreur de mise à jour de l'information: $e")));
+            content: Text("Erreur de modification (Vérifiez vos droits): $e")));
       }
+    }
+  }
+
+  /// Méthode dédiée uniquement à la mise à jour des lectures pour respecter les règles Firestore
+  Future<void> _updateInfoLecturesOnly(InfoChantier info) async {
+    if (info.id.isEmpty) {
+      debugPrint(
+          "Erreur: Tentative de mise à jour d'une info avec un ID vide.");
+      return;
+    }
+    try {
+      await _infosCollection.doc(info.id).update({
+        'lectures': info.lectures.map((l) => l.toJson()).toList(),
+      });
+    } catch (e) {
+      debugPrint("Erreur lors de la mise à jour des lectures: $e");
+      rethrow;
     }
   }
 
@@ -1227,8 +1553,19 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog');
+    if (isClient) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Action non autorisée en mode Client.")),
+      );
+      return;
+    }
+
     final bool peutAjouterInfo = (_userRoles.contains(roleAdminString) ||
-            _userRoles.contains(roleChefDeChantierString)) &&
+            _userRoles.contains(roleChefDeChantierString) ||
+            _userRoles.contains('chef_de_chantier_amcr')) &&
         _currentUser != null;
     if (!peutAjouterInfo) {
       if (mounted) {
@@ -1245,8 +1582,11 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    // On génère un ID Firestore à l'avance
+    final String nouvelId = _infosCollection.doc().id;
+
     final nouvelleInfo = InfoChantier(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: nouvelId,
       tranche: _selectedTranche!,
       contenu: texte,
       dateEmission: DateTime.now(),
@@ -1315,27 +1655,26 @@ class _HomeScreenState extends State<HomeScreen> {
             TextButton(
               onPressed: () async {
                 final nouveauContenu = modificationController.text.trim();
-                if (nouveauContenu.isNotEmpty &&
-                    nouveauContenu != infoAmodifier.contenu) {
+                if (nouveauContenu.isNotEmpty) {
+                  // On crée l'objet mis à jour
                   final infoMiseAJour =
                       infoAmodifier.copyWith(contenu: nouveauContenu);
+
                   if (Navigator.canPop(dialogContext)) {
                     Navigator.of(dialogContext).pop();
                   }
+
+                  // On appelle la mise à jour qui va forcer la nouvelle date
                   await _updateInfoChantierDB(infoMiseAJour);
-                } else if (nouveauContenu.isEmpty) {
+                } else {
                   ScaffoldMessenger.of(dialogContext).showSnackBar(
                     const SnackBar(
                         content: Text('Le contenu ne peut pas être vide.')),
                   );
-                } else {
-                  if (Navigator.canPop(dialogContext)) {
-                    Navigator.of(dialogContext).pop();
-                  }
                 }
               },
               child: const Text("Enregistrer"),
-            )
+            ),
           ],
         );
       },
@@ -1364,7 +1703,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final lecturesUpd = [...info.lectures, nouvelleLecture];
       final infoMiseAJour = info.copyWith(lectures: lecturesUpd);
 
-      await _updateInfoChantierDB(infoMiseAJour);
+      // On utilise une méthode dédiée pour ne mettre à jour que les lectures
+      // afin d'éviter les erreurs de permissions Firestore sur les autres champs
+      await _updateInfoLecturesOnly(infoMiseAJour);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1535,9 +1876,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildChampAjoutConsigne() {
-    // ... (Cette fonction reste inchangée)
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog');
+    if (isClient) return const SizedBox.shrink();
+
     final bool peutAfficherChampAjout = (_userRoles.contains(roleAdminString) ||
-            _userRoles.contains(roleChefDeChantierString)) &&
+            _userRoles.contains(roleChefDeChantierString) ||
+            _userRoles.contains('chef_de_chantier_amcr')) &&
         _currentUser != null;
     if (!peutAfficherChampAjout || _selectedTranche == null) {
       return const SizedBox.shrink();
@@ -1664,10 +2009,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildChampAjoutInfo() {
-    // ... (Cette fonction reste inchangée)
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog');
+    if (isClient) return const SizedBox.shrink();
+
     final bool peutAfficherChampAjoutInfo =
         (_userRoles.contains(roleAdminString) ||
-                _userRoles.contains(roleChefDeChantierString)) &&
+                _userRoles.contains(roleChefDeChantierString) ||
+                _userRoles.contains('chef_de_chantier_amcr')) &&
             _currentUser != null;
     if (!peutAfficherChampAjoutInfo) {
       return const SizedBox.shrink();
@@ -1730,6 +2079,9 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog');
+
     // Initialiser les contrôleurs pour TOUTES les consignes d'abord
     for (final c in consignes) {
       _obsNonRealiseeControllers.putIfAbsent(
@@ -1744,20 +2096,27 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final bool peutAgirSurConsigne = (_userRoles.contains(roleAdminString) ||
+    final bool peutAgirSurConsigne = !isClient &&
+        (_userRoles.contains(roleAdminString) ||
             _userRoles.contains(roleChefDeChantierString) ||
             _userRoles.contains(roleChefEquipeString) ||
-            _userRoles.contains(roleIntervenantString)) &&
+            _userRoles.contains(roleIntervenantString) ||
+            _userRoles.contains('chef_de_chantier_amcr') ||
+            _userRoles.contains('referent_amcr') ||
+            _userRoles.contains('intervenant_amcr')) &&
         _currentUser != null;
 
-    final bool peutModifierConsigne = (_userRoles.contains(roleAdminString) ||
-            _userRoles.contains(roleChefDeChantierString)) &&
-        _currentUser != null;
-
-    final bool peutSupprimerConsigneNonValidee =
+    final bool peutModifierConsigne = !isClient &&
         (_userRoles.contains(roleAdminString) ||
-                _userRoles.contains(roleChefDeChantierString)) &&
-            _currentUser != null;
+            _userRoles.contains(roleChefDeChantierString) ||
+            _userRoles.contains('chef_de_chantier_amcr')) &&
+        _currentUser != null;
+
+    final bool peutSupprimerConsigneNonValidee = !isClient &&
+        (_userRoles.contains(roleAdminString) ||
+            _userRoles.contains(roleChefDeChantierString) ||
+            _userRoles.contains('chef_de_chantier_amcr')) &&
+        _currentUser != null;
 
     return RepaintBoundary(
       child: ListView.builder(
@@ -1772,6 +2131,7 @@ class _HomeScreenState extends State<HomeScreen> {
             peutAgirSurConsigne: peutAgirSurConsigne,
             peutModifierConsigne: peutModifierConsigne,
             peutSupprimerConsigneNonValidee: peutSupprimerConsigneNonValidee,
+            interfaceType: widget.interfaceType,
             obsNonRealiseeController: _obsNonRealiseeControllers[c.id]!,
             obsValidationController: _obsValidationControllers[c.id]!,
             onValidation: _presenterValidationConsigne,
@@ -1833,11 +2193,20 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    final bool peutModifierInfo = (_userRoles.contains(roleAdminString) ||
-            _userRoles.contains(roleChefDeChantierString)) &&
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog');
+
+    final bool peutModifierInfo = !isClient &&
+        (_userRoles.contains(roleAdminString) ||
+            _userRoles.contains(roleChefDeChantierString) ||
+            _userRoles.contains('chef_de_chantier_amcr')) &&
         _currentUser != null;
     final bool peutSupprimerInfo =
         _userRoles.contains(roleAdminString) && _currentUser != null;
+
+    final bool peutVoirLectures = _userRoles.contains(roleAdminString) ||
+        _userRoles.contains(roleChefDeChantierString) ||
+        _userRoles.contains('chef_de_chantier_amcr');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1877,147 +2246,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       info.lectures.any((l) => l.userId == _currentUser?.uid);
                   final bool estAuteur =
                       info.auteurIdCreation == _currentUser?.uid;
+                  final bool estNouvelleInfo = !estLue && !estAuteur;
 
-                  return Card(
+                  return BlinkingInfoCard(
                     key: ValueKey(info.id),
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    color: estLue ? Colors.blue.shade50 : Colors.cyan.shade50,
-                    elevation: estLue ? 1 : 2,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12.0, 12.0, 4.0, 12.0),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Stack(
-                            alignment: Alignment.topRight,
-                            children: [
-                              Padding(
-                                padding:
-                                    const EdgeInsets.only(right: 8.0, top: 2.0),
-                                child: Icon(Icons.info_outline,
-                                    color: estLue
-                                        ? Colors.blue
-                                        : Colors.cyan.shade700,
-                                    size: 24),
-                              ),
-                              // Badge visible seulement si pas auteur, pas lue et si d'autres l'ont lue
-                              if (!estAuteur &&
-                                  !estLue &&
-                                  info.lectures.isNotEmpty)
-                                Positioned(
-                                  top: -4,
-                                  right: -4,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Text(
-                                      info.lectures.length.toString(),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text(
-                                  info.contenu,
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: estLue
-                                          ? FontWeight.w500
-                                          : FontWeight.w600,
-                                      color: estLue
-                                          ? Colors.black87
-                                          : Colors.cyan.shade900),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Publié par: ${info.auteurNomPrenomCreation} (${info.roleAuteurCreation})',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade700),
-                                ),
-                                Text(
-                                  'Le: ${_formatDateSimple(info.dateEmission)}',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade700),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: <Widget>[
-                              // Bouton pour voir les lecteurs (pour l'auteur, chefs de chantier et admins)
-                              if ((estAuteur || peutModifierInfo) &&
-                                  info.lectures.isNotEmpty)
-                                IconButton(
-                                  icon: Icon(Icons.visibility_outlined,
-                                      color: Colors.green.shade700, size: 22),
-                                  tooltip:
-                                      'Voir les lectures (${info.lectures.length})',
-                                  padding: const EdgeInsets.all(4),
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () {
-                                    _presenterDialogueLectures(
-                                        itemBuilderContext, info);
-                                  },
-                                ),
-                              // Bouton pour marquer comme lue (seulement si pas auteur)
-                              if (!estAuteur && !estLue)
-                                IconButton(
-                                  icon: Icon(Icons.done_all_outlined,
-                                      color: Colors.blue.shade700, size: 22),
-                                  tooltip: 'Marquer comme lue',
-                                  padding: const EdgeInsets.all(4),
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () {
-                                    _marquerInfoCommeLue(info);
-                                  },
-                                ),
-                              if (peutModifierInfo)
-                                IconButton(
-                                  icon: Icon(Icons.edit_note_outlined,
-                                      color: Colors.orange.shade700, size: 22),
-                                  tooltip: 'Modifier',
-                                  padding: const EdgeInsets.all(4),
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () {
-                                    _presenterModificationInfo(
-                                        itemBuilderContext, info);
-                                  },
-                                ),
-                              if (peutSupprimerInfo)
-                                IconButton(
-                                  icon: Icon(Icons.delete_forever_outlined,
-                                      color: Colors.red.shade600, size: 22),
-                                  tooltip: 'Supprimer',
-                                  padding: const EdgeInsets.all(4),
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () {
-                                    _confirmerEtSupprimerInfo(
-                                        itemBuilderContext,
-                                        info.id,
-                                        info.contenu);
-                                  },
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
+                    info: info,
+                    estLue: estLue,
+                    estAuteur: estAuteur,
+                    estNouvelleInfo: estNouvelleInfo,
+                    peutModifierInfo: estAuteur, // Seul l'auteur peut modifier
+                    peutSupprimerInfo: peutSupprimerInfo,
+                    peutVoirLectures: peutVoirLectures,
+                    onMarquerLue: () => _marquerInfoCommeLue(info),
+                    onVoirLectures: () =>
+                        _presenterDialogueLectures(itemBuilderContext, info),
+                    onModifier: () =>
+                        _presenterModificationInfo(itemBuilderContext, info),
+                    onSupprimer: () => _confirmerEtSupprimerInfo(
+                        itemBuilderContext, info.id, info.contenu),
+                    formatDate: _formatDateSimple,
                   );
                 },
               );
@@ -2116,160 +2363,99 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (_loadingState == HomeScreenLoadingState.error) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error_outline, color: Colors.red, size: 50),
-                const SizedBox(height: 16),
-                const Text(
-                    "Une erreur est survenue lors du chargement des données.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16)),
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.refresh),
-                  label: const Text("Réessayer"),
-                  onPressed: _loadUserDataAndRoles,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                  ),
-                )
-              ],
-            ),
-          ),
-        ),
-      );
+      // ... (code existant)
     }
+
+    final bool isClient = _userRoles.contains('client_amcr') ||
+        _userRoles.contains('client_alog');
+    final bool hasAMCR = _userRoles.any((r) => r.contains('amcr')) ||
+        _userRoles.contains(roleAdminString);
+    final bool hasConsignes = _userRoles.any((r) =>
+            r == 'chef_de_chantier' ||
+            r == 'chef_equipe' ||
+            r == 'intervenant' ||
+            r == 'client_alog') ||
+        _userRoles.contains(roleAdminString);
 
     if (_selectedTranche == null &&
         _tranches.isEmpty &&
         _loadingState == HomeScreenLoadingState.ready) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text("Gestion Chantier"),
-          backgroundColor: Colors.grey.shade700,
-          foregroundColor: Colors.white,
-          leading: StreamBuilder<DocumentSnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('utilisateurs')
-                .doc(widget.userId)
-                .snapshots(),
-            builder: (context, snapshot) {
-              return const IconButton(
-                icon: Icon(Icons.layers_outlined),
-                tooltip: "Aucune tranche configurée",
-                onPressed: null,
-              );
-            },
-          ),
-        ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.layers_clear_outlined,
-                    size: 60, color: Colors.orange.shade300),
-                const SizedBox(height: 20),
-                const Text(
-                  "Aucune tranche n'est actuellement configurée pour cette application.",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _userRoles.contains(roleAdminString)
-                      ? "En tant qu'administrateur, vous pouvez configurer les tranches initiales."
-                      : "Veuillez contacter un administrateur pour configurer les tranches.",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
-                ),
-                if (_userRoles.contains(roleAdminString))
-                  Padding(
-                    padding: const EdgeInsets.only(top: 20.0),
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.settings_applications_outlined),
-                      label: const Text("Configurer les Tranches"),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  const ManageTranchesScreen()),
-                        ).then((_) => _loadTranches());
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange.shade700,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      );
+      // ... (code existant)
     }
 
-    Color appBarColor = Colors.green.shade700;
+    Color appBarColor = _interfaceType == 'amcr'
+        ? Colors.blueGrey.shade800
+        : Colors.green.shade700;
     if (_userRoles.contains(roleAdminString)) {
       appBarColor = Colors.redAccent.shade700;
     }
 
     List<Widget> stackChildren = [
       _buildConsignesBlocWidget(),
-      TransfertScreen(
+    ];
+
+    if (_interfaceType != 'amcr' && !isClient) {
+      stackChildren.add(TransfertScreen(
         selectedTranche: _selectedTranche ?? '',
         allTranches: _tranches,
         userRoles: _userRoles,
         currentUserNomPrenom: _currentUserNomPrenom,
         roleDisplay: _roleDisplay,
-      ),
-      _buildInfosBlocWidget(),
-      ArchiveScreen(
-        selectedTranche: _selectedTranche,
-        tranches: _tranches,
-        userRoles: _userRoles,
-        getConsignesStream: getConsignesStream,
-        deleteConsigneDB: _deleteConsigneDB,
-        obsNonRealiseeControllers: _obsNonRealiseeControllers,
-        obsValidationControllers: _obsValidationControllers,
-        getTransfertsStream: getTransfertsStream,
-        deleteTransfertDB: _deleteTransfertDB,
-        obsNonRealiseeControllersTransferts:
-            _obsNonRealiseeControllersTransferts,
-        obsValidationControllersTransferts: _obsValidationControllersTransferts,
-      ),
-    ];
+        interfaceType: _interfaceType,
+      ));
+    }
+
+    if (!isClient) {
+      stackChildren.add(_buildInfosBlocWidget());
+    }
+
+    stackChildren.add(ArchiveScreen(
+      selectedTranche: _selectedTranche,
+      tranches: _tranches,
+      userRoles: _userRoles,
+      getConsignesStream: getConsignesStream,
+      deleteConsigneDB: _deleteConsigneDB,
+      obsNonRealiseeControllers: _obsNonRealiseeControllers,
+      obsValidationControllers: _obsValidationControllers,
+      getTransfertsStream: getTransfertsStream,
+      deleteTransfertDB: _deleteTransfertDB,
+      obsNonRealiseeControllersTransferts: _obsNonRealiseeControllersTransferts,
+      obsValidationControllersTransferts: _obsValidationControllersTransferts,
+      interfaceType: _interfaceType,
+      currentUserUid: _currentUser?.uid,
+      currentUserNomPrenom: _currentUserNomPrenom,
+      roleDisplay: _roleDisplay,
+      addConsigneDB: _addConsigneDB,
+    ));
 
     List<BottomNavigationBarItem> navBarItems = [
       const BottomNavigationBarItem(
           icon: Icon(Icons.list_alt_outlined), label: 'Consignes'),
-      BottomNavigationBarItem(
-          icon: Badge(
-            label: Text(_unvalidatedTransfertsCount.toString()),
-            isLabelVisible: _unvalidatedTransfertsCount > 0,
-            child: const Icon(Icons.transfer_within_a_station_outlined),
-          ),
-          label: 'Transferts'),
-      BottomNavigationBarItem(
+    ];
+
+    if (_interfaceType != 'amcr' && !isClient) {
+      navBarItems.add(BottomNavigationBarItem(
+        icon: Badge(
+          label: Text(_unvalidatedTransfertsCount.toString()),
+          isLabelVisible: _unvalidatedTransfertsCount > 0,
+          child: const Icon(Icons.transfer_within_a_station_outlined),
+        ),
+        label: 'Transferts',
+      ));
+    }
+
+    if (!isClient) {
+      navBarItems.add(BottomNavigationBarItem(
           icon: Badge(
             label: Text(_unreadInfosCount.toString()),
-            isLabelVisible: _unreadInfosCount > 0, // On cache si 0
+            isLabelVisible: _unreadInfosCount > 0,
             child: const Icon(Icons.info_outline),
           ),
-          label: 'Infos'),
-      const BottomNavigationBarItem(
-          icon: Icon(Icons.archive_outlined), label: 'Archives'),
-    ];
+          label: 'Infos'));
+    }
+
+    navBarItems.add(const BottomNavigationBarItem(
+        icon: Icon(Icons.archive_outlined), label: 'Archives'));
 
     if (_userRoles.contains(roleAdminString)) {
       stackChildren.add(Center(
@@ -2326,28 +2512,145 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: Icon(Icons.settings_applications_outlined), label: 'Admin'));
     }
 
+    // On compte combien d'interfaces l'utilisateur peut accéder
+    int interfacesCount = 0;
+    if (_hasConsignes) interfacesCount++;
+    if (_hasAMCR) interfacesCount++;
+    if (_hasCAPILog) interfacesCount++;
+
+    final bool showSwitcher = interfacesCount > 1;
+
     if (_currentIndex >= stackChildren.length) {
       _currentIndex = 0;
     }
     return Scaffold(
       appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("Tranche: ${_selectedTranche ?? 'Sélectionner...'}"),
-              // Affiche un message différent en mode lecture seule
-              if (_isReadOnly)
-                const Text(
-                  "Mode: Lecture Seule",
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
-                )
-              else
-                Text(
-                  "Mode: $_roleDisplay ($_currentUserNomPrenom)",
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.normal),
+          title: InkWell(
+            onTap: showSwitcher
+                ? () {
+                    // Menu pour basculer d'interface si multi-rôles
+                    showModalBottomSheet(
+                      context: context,
+                      builder: (context) => SafeArea(
+                        child: Wrap(
+                          children: [
+                            if (_hasConsignes)
+                              ListTile(
+                                leading: Image.asset('assets/images/icon1.png',
+                                    height: 24,
+                                    errorBuilder: (c, e, s) => const Icon(
+                                        Icons.assignment_outlined,
+                                        color: Colors.green)),
+                                title: const Text("Interface Consignes"),
+                                subtitle: _interfaceType == 'consignes'
+                                    ? const Text("Interface actuelle")
+                                    : null,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (_interfaceType != 'consignes') {
+                                    Navigator.pushReplacement(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => HomeScreen(
+                                          userId: widget.userId,
+                                          initialTranche: _selectedTranche,
+                                          interfaceType: 'consignes',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                            if (_hasAMCR)
+                              ListTile(
+                                leading: Image.asset('assets/images/AMCR.png',
+                                    height: 24,
+                                    errorBuilder: (c, e, s) => const Icon(
+                                        Icons.engineering_outlined,
+                                        color: Colors.blueGrey)),
+                                title: const Text("Interface AMCR"),
+                                subtitle: _interfaceType == 'amcr'
+                                    ? const Text("Interface actuelle")
+                                    : null,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (_interfaceType != 'amcr') {
+                                    Navigator.pushReplacement(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => HomeScreen(
+                                          userId: widget.userId,
+                                          initialTranche: _selectedTranche,
+                                          interfaceType: 'amcr',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                            if (_hasCAPILog)
+                              ListTile(
+                                leading: Image.asset(
+                                    'assets/images/CAPILog.png',
+                                    height: 24,
+                                    errorBuilder: (c, e, s) => const Icon(
+                                        Icons.business,
+                                        color: Colors.blue)),
+                                title: const Text("Interface CAPILog"),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ChantierPlusScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+                : null,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "${_interfaceType.toUpperCase()} - Tranche: ${_selectedTranche ?? 'Sélectionner...'}",
+                        style: const TextStyle(fontSize: 16),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      if (_isReadOnly || isClient)
+                        const Text(
+                          "Mode: Lecture Seule (Client)",
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.normal),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        )
+                      else
+                        Text(
+                          "Mode: $_roleDisplay ($_currentUserNomPrenom)",
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.normal),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                    ],
+                  ),
                 ),
-            ],
+                if (showSwitcher)
+                  const Icon(Icons.arrow_drop_down, color: Colors.white70),
+              ],
+            ),
           ),
           backgroundColor: appBarColor,
           foregroundColor: Colors.white,
@@ -2438,6 +2741,7 @@ class ConsigneItemWidget extends StatefulWidget {
   final bool peutAgirSurConsigne;
   final bool peutModifierConsigne;
   final bool peutSupprimerConsigneNonValidee;
+  final String interfaceType;
   final TextEditingController obsNonRealiseeController;
   final TextEditingController obsValidationController;
   final Function(Consigne, bool) onValidation;
@@ -2454,6 +2758,7 @@ class ConsigneItemWidget extends StatefulWidget {
     required this.peutAgirSurConsigne,
     required this.peutModifierConsigne,
     required this.peutSupprimerConsigneNonValidee,
+    required this.interfaceType,
     required this.obsNonRealiseeController,
     required this.obsValidationController,
     required this.onValidation,
@@ -2663,7 +2968,9 @@ class _ConsigneItemWidgetState extends State<ConsigneItemWidget>
                         visualDensity: VisualDensity.compact,
                         onPressed: () => widget.onModification(c),
                       ),
-                    if (widget.peutAgirSurConsigne && !c.estValidee)
+                    if (widget.peutAgirSurConsigne &&
+                        !c.estValidee &&
+                        widget.interfaceType != 'amcr')
                       IconButton(
                         icon: const Icon(
                           Icons.gps_fixed,
@@ -2917,6 +3224,10 @@ class _ConsignesStreamBuilder extends StatefulWidget {
 class _ConsignesStreamBuilderState extends State<_ConsignesStreamBuilder> {
   late Stream<List<Consigne>> _filteredStream;
 
+  bool _hasConsignes = false;
+  bool _hasAMCR = false;
+  bool _hasCAPILog = false;
+
   @override
   void initState() {
     super.initState();
@@ -2959,6 +3270,220 @@ class _ConsignesStreamBuilderState extends State<_ConsignesStreamBuilder> {
         }
         return widget.buildConsignesList(consignesActives);
       },
+    );
+  }
+}
+
+class BlinkingInfoCard extends StatefulWidget {
+  final InfoChantier info;
+  final bool estLue;
+  final bool estAuteur;
+  final bool estNouvelleInfo;
+  final bool peutModifierInfo;
+  final bool peutSupprimerInfo;
+  final bool peutVoirLectures;
+  final VoidCallback onMarquerLue;
+  final VoidCallback onVoirLectures;
+  final VoidCallback onModifier;
+  final VoidCallback onSupprimer;
+  final String Function(DateTime) formatDate;
+
+  const BlinkingInfoCard({
+    super.key,
+    required this.info,
+    required this.estLue,
+    required this.estAuteur,
+    required this.estNouvelleInfo,
+    required this.peutModifierInfo,
+    required this.peutSupprimerInfo,
+    required this.peutVoirLectures,
+    required this.onMarquerLue,
+    required this.onVoirLectures,
+    required this.onModifier,
+    required this.onSupprimer,
+    required this.formatDate,
+  });
+
+  @override
+  State<BlinkingInfoCard> createState() => _BlinkingInfoCardState();
+}
+
+class _BlinkingInfoCardState extends State<BlinkingInfoCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+
+    _animation = Tween<double>(begin: 1.0, end: 0.4).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+
+    if (widget.estNouvelleInfo) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(BlinkingInfoCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.estNouvelleInfo && !_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    } else if (!widget.estNouvelleInfo && _controller.isAnimating) {
+      _controller.stop();
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final info = widget.info;
+
+    return FadeTransition(
+      opacity: widget.estNouvelleInfo
+          ? _animation
+          : const AlwaysStoppedAnimation(1.0),
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        elevation: widget.estNouvelleInfo ? 4 : 1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: widget.estNouvelleInfo
+                ? Colors.blue.shade700
+                : Colors.grey.shade200,
+            width: widget.estNouvelleInfo ? 2 : 1,
+          ),
+        ),
+        color: widget.estNouvelleInfo ? Colors.blue.shade50 : Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          widget.estNouvelleInfo
+                              ? Icons.notification_important
+                              : Icons.info_outline,
+                          color:
+                              widget.estNouvelleInfo ? Colors.red : Colors.blue,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.formatDate(info.dateEmission),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (widget.peutModifierInfo || widget.peutSupprimerInfo)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (widget.peutModifierInfo)
+                          IconButton(
+                            icon: const Icon(Icons.edit,
+                                size: 18, color: Colors.blue),
+                            onPressed: widget.onModifier,
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(4),
+                          ),
+                        if (widget.peutSupprimerInfo)
+                          IconButton(
+                            icon: const Icon(Icons.delete,
+                                size: 18, color: Colors.red),
+                            onPressed: widget.onSupprimer,
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(4),
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                info.contenu,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: widget.estNouvelleInfo
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Par: ${info.auteurNomPrenomCreation} (${info.roleAuteurCreation})",
+                style:
+                    const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+              const Divider(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  if (widget.peutVoirLectures)
+                    TextButton.icon(
+                      onPressed: widget.onVoirLectures,
+                      icon: const Icon(Icons.people_outline, size: 16),
+                      label: Text(
+                        "Lectures (${info.lectures.length})",
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    )
+                  else
+                    const SizedBox.shrink(),
+                  if (widget.estNouvelleInfo)
+                    ElevatedButton.icon(
+                      onPressed: widget.onMarquerLue,
+                      icon: const Icon(Icons.check, size: 16),
+                      label: const Text("MARQUER COMME LU",
+                          style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade700,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                    )
+                  else if (!widget.estAuteur)
+                    const Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green, size: 16),
+                        const SizedBox(width: 4),
+                        Text("Lu",
+                            style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

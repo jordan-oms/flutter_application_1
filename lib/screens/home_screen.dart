@@ -1158,10 +1158,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // --- CORRECTION 1 : SIMPLIFICATION DE _updateConsigneDB ---
   Future<void> _updateConsigneDB(Consigne consigne) async {
-    // La méthode toJson() dans votre modèle Consigne fait déjà tout le travail.
-    // Cette fonction devient donc beaucoup plus simple.
     try {
-      await _consignesRefGlobal.doc(consigne.id).set(consigne.toJson());
+      // On vérifie si l'utilisateur est un "éditeur" (Admin, Chef de chantier, etc.)
+      bool userIsEditor = _userRoles.contains(roleAdminString) ||
+          _userRoles.contains(roleChefDeChantierString) ||
+          _userRoles.contains('chef_de_chantier_amcr') ||
+          _userRoles.contains('referent') ||
+          _userRoles.contains('referent_amcr');
+
+      if (userIsEditor) {
+        // Les éditeurs peuvent tout modifier, on peut garder le .set()
+        await _consignesRefGlobal.doc(consigne.id).set(consigne.toJson());
+      } else {
+        // Pour les agents de terrain, on utilise .update() avec UNIQUEMENT les clés autorisées
+        // par les règles Firestore pour éviter le "Permission Denied" sur les champs statiques.
+        await _consignesRefGlobal.doc(consigne.id).update({
+          'estValidee': consigne.estValidee,
+          'dateValidation': consigne.dateValidation != null
+              ? Timestamp.fromDate(consigne.dateValidation!)
+              : null,
+          'commentaireValidation': consigne.commentaireValidation,
+          'idAuteurValidation': consigne.idAuteurValidation,
+          'nomPrenomValidation': consigne.nomPrenomValidation,
+          'dosimetrieInfo': consigne.dosimetrieInfo,
+          'estNonRealiseeEffectivement': consigne.estNonRealiseeEffectivement,
+          'commentairesNonRealisation': consigne.commentairesNonRealisation
+              ?.map((c) => c.toJson())
+              .toList(),
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

@@ -178,19 +178,22 @@ class _ChantierPlusScreenState extends State<ChantierPlusScreen> {
                   .startAt([selectedTranche]).endAt(
                       ['$selectedTranche\uf8ff']).snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting)
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
+                }
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return _buildEmptyState(
                       "Aucun repère en Tranche $selectedTranche");
+                }
 
                 final docs = snapshot.data!.docs
                     .where((doc) => doc.id.toUpperCase().contains(searchText))
                     .toList();
 
-                if (docs.isEmpty)
+                if (docs.isEmpty) {
                   return _buildEmptyState("Aucun résultat pour '$searchText'");
+                }
 
                 return ListView.builder(
                   padding: const EdgeInsets.only(top: 10, bottom: 80),

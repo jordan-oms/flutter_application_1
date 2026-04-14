@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter/services.dart';
 
 class DetailRepereScreen extends StatefulWidget {
   final String repereId;
@@ -273,11 +272,12 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                                   0) >
                               0)
                           .toList();
-                  if (itemsToShow.isEmpty)
+                  if (itemsToShow.isEmpty) {
                     return const SliverToBoxAdapter(child: SizedBox.shrink());
+                  }
                   return SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
-                      if (index == 0)
+                      if (index == 0) {
                         return Padding(
                             padding: const EdgeInsets.fromLTRB(20, 25, 20, 10),
                             child: Text(entry.key.toUpperCase(),
@@ -285,6 +285,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                                     color: oMSGreen,
                                     fontWeight: FontWeight.w800,
                                     fontSize: 13)));
+                      }
                       return _buildMaterielTile(itemsToShow[index - 1]);
                     }, childCount: itemsToShow.length + 1),
                   );
@@ -469,7 +470,7 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: DropdownButtonFormField<String>(
-        value: algorithmeTypes[nom],
+        initialValue: algorithmeTypes[nom],
         style: const TextStyle(color: Colors.black, fontSize: 13),
         decoration: InputDecoration(
           labelText: "Type de protection",
@@ -646,8 +647,9 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
                     .orderBy('date', descending: true)
                     .snapshots(),
                 builder: (context, snap) {
-                  if (!snap.hasData)
+                  if (!snap.hasData) {
                     return const Center(child: CircularProgressIndicator());
+                  }
                   final docs = snap.data!.docs;
                   return ListView.builder(
                       controller: sc,
@@ -719,8 +721,9 @@ class _DetailRepereScreenState extends State<DetailRepereScreen> {
           .doc(user.uid)
           .get();
       if (!read.exists ||
-          last.seconds > (read.data()?['lastRead'] as Timestamp).seconds)
+          last.seconds > (read.data()?['lastRead'] as Timestamp).seconds) {
         setState(() => hasNewNotifications = true);
+      }
     }
   }
 

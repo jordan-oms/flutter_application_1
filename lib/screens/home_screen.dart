@@ -161,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
       {};
 
   StreamSubscription<List<Transfert>>? _transfertsBadgeSubscription;
-  List<Consigne> _lastConsignesSnapshot = [];
+  final List<Consigne> _lastConsignesSnapshot = [];
   final List<String> _categoriesConsignes = [
     "Confinement",
     "Protection Biologique",
@@ -517,7 +517,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Choix de la catégorie (si pas AMCR)
                     if (_interfaceType != 'amcr')
                       DropdownButtonFormField<String>(
-                        value: selectedCategorie,
+                        initialValue: selectedCategorie,
                         decoration:
                             const InputDecoration(labelText: "Catégorie"),
                         items: _categoriesConsignes
@@ -530,7 +530,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 8),
                     // Choix de l'enjeu
                     DropdownButtonFormField<String>(
-                      value: selectedEnjeu,
+                      initialValue: selectedEnjeu,
                       decoration: const InputDecoration(labelText: "Enjeu"),
                       items: optionsEnjeux
                           .map((enjeu) => DropdownMenuItem(
@@ -1001,7 +1001,7 @@ class _HomeScreenState extends State<HomeScreen> {
     for (var t in transferts) {
       // LE BADGE ET L'ALERTE S'AFFICHENT SI :
       final String myTrancheNorm = myTranche ?? "";
-      final bool estOrigine = (t.tranche?.trim() ?? "") == myTrancheNorm;
+      final bool estOrigine = (t.tranche.trim() ?? "") == myTrancheNorm;
       final bool estDansPortefeuille =
           t.tranchesVisibles?.any((e) => e.trim() == myTrancheNorm) ?? false;
 
@@ -1241,7 +1241,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     _observationValidationDialogController.text.trim();
                 String commentaireAvecAuteur = "";
                 if (observationTexte.isNotEmpty) {
-                  commentaireAvecAuteur = "$observationTexte";
+                  commentaireAvecAuteur = observationTexte;
                 }
                 Navigator.of(dialogContext).pop();
                 _observationValidationDialogController.clear();
@@ -2951,7 +2951,7 @@ class ConsigneItemWidget extends StatefulWidget {
   final String Function(DateTime) formatDate;
 
   const ConsigneItemWidget({
-    Key? key,
+    super.key,
     required this.consigne,
     required this.peutAgirSurConsigne,
     required this.peutModifierConsigne,
@@ -2966,7 +2966,7 @@ class ConsigneItemWidget extends StatefulWidget {
     required this.onEnregistrerObsNonRealisation,
     required this.onEnregistrerObsValidation,
     required this.formatDate,
-  }) : super(key: key);
+  });
 
   @override
   State<ConsigneItemWidget> createState() => _ConsigneItemWidgetState();
@@ -3665,7 +3665,7 @@ class _BlinkingInfoCardState extends State<BlinkingInfoCard>
                     const Row(
                       children: [
                         Icon(Icons.check_circle, color: Colors.green, size: 16),
-                        const SizedBox(width: 4),
+                        SizedBox(width: 4),
                         Text("Lu",
                             style: TextStyle(
                                 color: Colors.green,

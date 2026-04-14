@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'creation_utilisateur_admin_screen.dart';
 
 class GererLesUtilisateursScreen extends StatefulWidget {
-  const GererLesUtilisateursScreen({Key? key}) : super(key: key);
+  const GererLesUtilisateursScreen({super.key});
 
   @override
   State<GererLesUtilisateursScreen> createState() =>
@@ -66,7 +66,7 @@ class _GererLesUtilisateursScreenState extends State<GererLesUtilisateursScreen>
 class UserListView extends StatefulWidget {
   final String statut;
 
-  const UserListView({Key? key, required this.statut}) : super(key: key);
+  const UserListView({super.key, required this.statut});
 
   @override
   State<UserListView> createState() => _UserListViewState();
@@ -193,7 +193,7 @@ class _UserListViewState extends State<UserListView> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: DropdownButtonFormField<String>(
-              value: _selectedFilterRole,
+              initialValue: _selectedFilterRole,
               decoration: const InputDecoration(
                 labelText: 'Filtrer par rôle',
                 border: OutlineInputBorder(),
@@ -328,11 +328,11 @@ class ActiveUserCard extends StatefulWidget {
   final void Function(String uid) onDelete;
 
   const ActiveUserCard({
-    Key? key,
+    super.key,
     required this.userDocument,
     required this.onUpdate,
     required this.onDelete,
-  }) : super(key: key);
+  });
 
   @override
   State<ActiveUserCard> createState() => _ActiveUserCardState();
@@ -500,10 +500,10 @@ class UserValidationCard extends StatefulWidget {
   final void Function(String uid, Map<String, dynamic> data) onValidate;
 
   const UserValidationCard({
-    Key? key,
+    super.key,
     required this.userDocument,
     required this.onValidate,
-  }) : super(key: key);
+  });
 
   @override
   State<UserValidationCard> createState() => _UserValidationCardState();

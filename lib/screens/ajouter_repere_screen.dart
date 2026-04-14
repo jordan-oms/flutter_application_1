@@ -330,9 +330,10 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("Erreur : $e")));
+      }
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -562,7 +563,7 @@ class _AjouterRepereScreenState extends State<AjouterRepereScreen> {
 
   Widget _buildProtectionDropdown(String nom) {
     return DropdownButtonFormField<String>(
-      value: algorithmeTypes[nom],
+      initialValue: algorithmeTypes[nom],
       decoration: _dropdownDecoration("Type de protection"),
       items: const [
         DropdownMenuItem(

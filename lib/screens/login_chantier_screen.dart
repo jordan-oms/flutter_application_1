@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'creation_de_compte.dart';
-import 'home_screen.dart'; // Import pour la navigation
+// Import pour la navigation
 
 class LoginChantierScreen extends StatefulWidget {
   final Function onSuccess;
@@ -138,9 +138,10 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
               ElevatedButton(
                 onPressed: () async {
                   if (!_isValidEmail(emailController.text.trim())) {
-                    if (mounted)
+                    if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text("Email invalide")));
+                    }
                     return;
                   }
                   setStateDialog(() => loading = true);
@@ -152,8 +153,9 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
                       _showSnack("Email de réinitialisation envoyé");
                     }
                   } catch (e) {
-                    if (mounted)
+                    if (mounted) {
                       _showSnack("Erreur lors de l'envoi de l'email");
+                    }
                   } finally {
                     if (mounted) setStateDialog(() => loading = false);
                   }

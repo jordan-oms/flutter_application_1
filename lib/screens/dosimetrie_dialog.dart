@@ -62,10 +62,9 @@ class _DosimetrieSaisieItem extends StatelessWidget {
   final VoidCallback onRemove;
 
   const _DosimetrieSaisieItem({
-    Key? key,
     required this.controller,
     required this.onRemove,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -104,12 +103,12 @@ class DosimetrieDialog extends StatefulWidget {
   final Function(Consigne) onUpdateConsigne;
 
   const DosimetrieDialog({
-    Key? key,
+    super.key,
     required this.consigneAValider,
     required this.commentaireInitial,
     required this.currentUserUid,
     required this.onUpdateConsigne,
-  }) : super(key: key);
+  });
 
   @override
   State<DosimetrieDialog> createState() => _DosimetrieDialogState();

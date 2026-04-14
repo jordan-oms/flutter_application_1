@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 // La structure de ce widget est garantie valide.
 class CreationUtilisateurAdminScreen extends StatefulWidget {
-  const CreationUtilisateurAdminScreen({Key? key}) : super(key: key);
+  const CreationUtilisateurAdminScreen({super.key});
 
   @override
   State<CreationUtilisateurAdminScreen> createState() =>

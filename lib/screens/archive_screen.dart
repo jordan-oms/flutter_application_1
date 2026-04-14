@@ -200,14 +200,14 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
       if (item is Consigne) {
         // On filtre les consignes par la tranche sélectionnée
-        final bool memeTranche = (item.tranche?.trim() ?? "") == myTranche;
+        final bool memeTranche = (item.tranche.trim() ?? "") == myTranche;
         return item.estValidee &&
             memeTranche &&
             (item.contenu.toLowerCase().contains(q) ||
                 item.auteurNomPrenomCreation.toLowerCase().contains(q));
       } else if (item is Transfert) {
         // On filtre les transferts par la tranche d'origine (isolation des archives)
-        final bool estOrigine = (item.tranche?.trim() ?? "") == myTranche;
+        final bool estOrigine = (item.tranche.trim() ?? "") == myTranche;
         return item.estValidee &&
             estOrigine &&
             (item.contenu.toLowerCase().contains(q) ||
@@ -728,7 +728,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
   Widget? _buildExcelButton(List<dynamic> items) {
     if (!(widget.userRoles.contains(roleAdminString) ||
-        widget.userRoles.contains(roleChefDeChantierString))) return null;
+        widget.userRoles.contains(roleChefDeChantierString))) {
+      return null;
+    }
     return FloatingActionButton(
       backgroundColor: widget.interfaceType == 'amcr'
           ? Colors.blueGrey.shade700

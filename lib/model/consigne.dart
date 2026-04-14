@@ -1,7 +1,6 @@
 // lib/model/consigne.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart' as fs;
-import 'package:flutter/foundation.dart';
 import '/model/commentaire.dart';
 
 class Consigne {

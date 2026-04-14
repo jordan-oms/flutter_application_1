@@ -259,7 +259,7 @@ class _ExcelScreenState extends State<ExcelScreen> {
         }
       }
 
-      final fileBytes = await excel.encode();
+      final fileBytes = excel.encode();
       if (fileBytes == null) throw Exception("Erreur génération Excel");
 
       await FileSaver.instance.saveFile(

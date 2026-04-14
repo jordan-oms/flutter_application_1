@@ -5,7 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CreationDeCompte extends StatefulWidget {
-  const CreationDeCompte({Key? key}) : super(key: key);
+  const CreationDeCompte({super.key});
 
   @override
   _CreationDeCompteState createState() => _CreationDeCompteState();

@@ -26,6 +26,7 @@ dependencies:
   flutter_svg: ^2.0.10+1
   intl: ^0.20.2  # Obligatoire pour le formatage des dates qu'on a ajouté
   csv: ^6.0.0
+  mobile_scanner: ^6.0.0
 
 
 
@@ -46,6 +47,7 @@ flutter:
     - assets/images/CAPILog.png
     - assets/images/VSP.png
     - assets/images/AMCR.png
+    - assets/images/LocaLog.png
 
 
 flutter_launcher_icons:

@@ -21,6 +21,7 @@ import 'dosimetrie_dialog.dart';
 import 'gerer_les_utilisateur.dart';
 import './chantier_plus_screen.dart';
 import './transfert_screen.dart';
+import './localog_screen.dart';
 
 // ... (vos imports existants)
 import '../widgets/tranche_selector.dart';
@@ -186,6 +187,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _hasConsignes = false;
   bool _hasAMCR = false;
   bool _hasCAPILog = false;
+  bool _hasLocaLog = false;
 
   @override
   void initState() {
@@ -770,6 +772,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _hasConsignes = isAdmin || data['isConsignes'] == true;
         _hasAMCR = isAdmin || data['isAMCR'] == true;
         _hasCAPILog = isAdmin || data['isCAPILog'] == true;
+        _hasLocaLog = isAdmin || data['isLocaLog'] == true;
 
         // On récupère le nom et le prénom séparément
         String? nom = data['nom'] as String?;
@@ -2692,6 +2695,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_hasConsignes) interfacesCount++;
     if (_hasAMCR) interfacesCount++;
     if (_hasCAPILog) interfacesCount++;
+    if (_hasLocaLog) interfacesCount++;
 
     final bool showSwitcher = interfacesCount > 1;
 
@@ -2832,6 +2836,30 @@ class _HomeScreenState extends State<HomeScreen> {
                                   );
                                 },
                               ),
+                            if (_hasLocaLog)
+                              ListTile(
+                                leading: Image.asset(
+                                    'assets/images/LocaLog.png',
+                                    height: 24,
+                                    errorBuilder: (c, e, s) => const Icon(
+                                        Icons.location_on,
+                                        color: Colors.blueGrey)),
+                                title: const Text("Interface LocaLog"),
+                                subtitle: _interfaceType == 'localog'
+                                    ? const Text("Interface actuelle")
+                                    : null,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  Navigator.pushReplacement(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => LocalogScreen(
+                                        userId: widget.userId ?? '',
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                           ],
                         ),
                       ),
@@ -2927,9 +2955,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ]
               : [
                   IconButton(
-                    icon: const Icon(Icons.logout_outlined),
-                    tooltip: "Déconnexion / Changer de rôle",
-                    onPressed: _triggerReSelectionAndNavigate,
+                    icon: const Icon(Icons.logout),
+                    tooltip: "Se déconnecter",
+                    onPressed: () => RoleSelectionScreen.forceSignOut(context),
                   ),
                 ]),
       body: SafeArea(

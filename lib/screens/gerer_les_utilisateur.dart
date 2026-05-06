@@ -343,6 +343,7 @@ class _ActiveUserCardState extends State<ActiveUserCard> {
   late bool _isAMCR;
   late bool _isCAPILog;
   late bool _isConsignes;
+  late bool _isLocaLog;
   final List<String> _roles = const [
     'administrateur',
     'chef_de_chantier',
@@ -364,6 +365,7 @@ class _ActiveUserCardState extends State<ActiveUserCard> {
     _isAMCR = data['isAMCR'] ?? false;
     _isCAPILog = data['isCAPILog'] ?? false;
     _isConsignes = data['isConsignes'] ?? false;
+    _isLocaLog = data['isLocaLog'] ?? false;
   }
 
   String _displayRole(String role) {
@@ -474,6 +476,20 @@ class _ActiveUserCardState extends State<ActiveUserCard> {
                     });
                   },
                 ),
+                SwitchListTile(
+                  title: const Text('Accès LocaLog'),
+                  subtitle:
+                      const Text('Autoriser l\'accès à l\'interface LocaLog'),
+                  value: _isLocaLog,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isLocaLog = value;
+                    });
+                    widget.onUpdate(widget.userDocument.id, {
+                      'isLocaLog': _isLocaLog,
+                    });
+                  },
+                ),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -514,6 +530,7 @@ class _UserValidationCardState extends State<UserValidationCard> {
   bool _isAMCR = false;
   bool _isCAPILog = false;
   bool _isConsignes = false;
+  bool _isLocaLog = false;
   final List<String> _roles = const [
     'administrateur',
     'chef_de_chantier',
@@ -535,6 +552,7 @@ class _UserValidationCardState extends State<UserValidationCard> {
     _isAMCR = data['isAMCR'] ?? false;
     _isCAPILog = data['isCAPILog'] ?? false;
     _isConsignes = data['isConsignes'] ?? false;
+    _isLocaLog = data['isLocaLog'] ?? false;
   }
 
   String _displayRole(String role) {
@@ -622,6 +640,15 @@ class _UserValidationCardState extends State<UserValidationCard> {
                     });
                   },
                 ),
+                SwitchListTile(
+                  title: const Text('Accès LocaLog'),
+                  value: _isLocaLog,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _isLocaLog = value;
+                    });
+                  },
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -635,6 +662,7 @@ class _UserValidationCardState extends State<UserValidationCard> {
                           'isAMCR': _isAMCR,
                           'isCAPILog': _isCAPILog,
                           'isConsignes': _isConsignes,
+                          'isLocaLog': _isLocaLog,
                           'isAwaitingValidation': false, // Correction cruciale
                         },
                       );

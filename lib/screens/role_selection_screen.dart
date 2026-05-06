@@ -8,7 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart'; // Pour accéder à la constante DEPLOYMENT_ID
 import 'home_screen.dart';
 import 'login_chantier_screen.dart';
-import 'chantier_plus_screen.dart'; // <-- 1. IMPORTER LE NOUVEL ÉCRAN
+import 'chantier_plus_screen.dart';
+import 'localog_screen.dart';
 
 // ... (Le début du fichier reste identique)
 Future<void> _saveDeploymentId() async {
@@ -21,23 +22,33 @@ Future<void> _saveDeploymentId() async {
 }
 
 class RoleSelectionScreen extends StatefulWidget {
-  const RoleSelectionScreen({super.key});
+  final bool isSwitching;
+  const RoleSelectionScreen({super.key, this.isSwitching = false});
 
   static Future<bool?> triggerRoleReSelection(
       BuildContext externalContext) async {
-    try {
-      await FirebaseAuth.instance.signOut();
-    } catch (e, s) {
-      debugPrint("Erreur pendant la déconnexion: $e\n$s");
-    }
-
+    // On ne se déconnecte plus ici pour permettre le changement d'interface
+    // Si on veut vraiment se déconnecter, on créera un autre bouton.
     if (!externalContext.mounted) return null;
 
     return await Navigator.pushAndRemoveUntil<bool?>(
       externalContext,
-      MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+      MaterialPageRoute(
+          builder: (_) => const RoleSelectionScreen(isSwitching: true)),
       (Route<dynamic> route) => false,
     );
+  }
+
+  // Méthode pour se déconnecter réellement
+  static Future<void> forceSignOut(BuildContext context) async {
+    await FirebaseAuth.instance.signOut();
+    if (context.mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+        (route) => false,
+      );
+    }
   }
 
   @override
@@ -51,7 +62,11 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
   @override
   void initState() {
     super.initState();
-    _checkUserAndNavigate();
+    if (widget.isSwitching) {
+      setState(() => _isLoading = false);
+    } else {
+      _checkUserAndNavigate();
+    }
   }
 
   Future<void> _checkUserAndNavigate() async {
@@ -64,9 +79,6 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
           .doc(currentUser.uid)
           .get();
       if (!mounted) return;
-      final data = userDoc.data();
-      final roles = data != null ? data['roles'] as List<dynamic>? : null;
-      final isAMCR = data != null ? data['isAMCR'] == true : false;
 
       if (userDoc.exists) {
         final data = userDoc.data()!;
@@ -74,22 +86,55 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
         final bool isAdmin = roles.contains('administrateur');
         final bool isAMCRAuthorized = data['isAMCR'] == true;
         final bool isConsignesAuthorized = data['isConsignes'] == true;
+        final bool isLocaLogAuthorized = data['isLocaLog'] == true;
 
-        // Déterminer l'interface par défaut
-        String interfaceType = 'consignes';
-
-        // Si l'utilisateur a l'autorisation AMCR mais PAS les consignes (et n'est pas admin)
-        if (isAMCRAuthorized && !isConsignesAuthorized && !isAdmin) {
-          interfaceType = 'amcr';
+        // Déterminer l'interface par défaut et naviguer
+        if (isConsignesAuthorized || isAdmin) {
+          Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (_) => HomeScreen(
+                  userId: currentUser.uid,
+                  initialTranche: data['favoriteTranche'],
+                  interfaceType: 'consignes',
+                ),
+              ),
+              (Route<dynamic> route) => false);
+          return;
         }
 
+        if (isAMCRAuthorized) {
+          Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (_) => HomeScreen(
+                  userId: currentUser.uid,
+                  initialTranche: data['favoriteTranche'],
+                  interfaceType: 'amcr',
+                ),
+              ),
+              (Route<dynamic> route) => false);
+          return;
+        }
+
+        if (isLocaLogAuthorized) {
+          Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (_) => LocalogScreen(userId: currentUser.uid),
+              ),
+              (Route<dynamic> route) => false);
+          return;
+        }
+
+        // Si aucune autorisation spécifique, on tente HomeScreen par défaut (qui gèrera le refus)
         Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(
               builder: (_) => HomeScreen(
                 userId: currentUser.uid,
                 initialTranche: data['favoriteTranche'],
-                interfaceType: interfaceType,
+                interfaceType: 'consignes',
               ),
             ),
             (Route<dynamic> route) => false);
@@ -109,20 +154,24 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
     setState(() => _isProcessingLogin = true);
 
     try {
-      bool? loginSuccess = await Navigator.push<bool?>(
-        context,
-        MaterialPageRoute(
-            builder: (_) => LoginChantierScreen(onSuccess: () {})),
-      );
+      User? currentUser = FirebaseAuth.instance.currentUser;
+      bool loginSuccess = false;
 
-      if (loginSuccess == true) {
-        await _saveDeploymentId();
-        final currentUser = FirebaseAuth.instance.currentUser;
-        if (currentUser == null) {
-          if (mounted) setState(() => _isProcessingLogin = false);
-          return;
-        }
+      if (currentUser != null) {
+        // Déjà connecté, on passe direct à la vérification des droits
+        loginSuccess = true;
+      } else {
+        // Pas connecté, on demande l'auth
+        bool? result = await Navigator.push<bool?>(
+          context,
+          MaterialPageRoute(
+              builder: (_) => LoginChantierScreen(onSuccess: () {})),
+        );
+        loginSuccess = result == true;
+        currentUser = FirebaseAuth.instance.currentUser;
+      }
 
+      if (loginSuccess && currentUser != null) {
         final userDoc = await fs.FirebaseFirestore.instance
             .collection('utilisateurs')
             .doc(currentUser.uid)
@@ -166,17 +215,29 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
           return;
         }
 
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(
-            builder: (_) => HomeScreen(
-              userId: currentUser.uid,
-              initialTranche: data?['favoriteTranche'],
-              interfaceType: interfaceType,
+        // LocaLog est accessible à tous les utilisateurs authentifiés
+
+        if (interfaceType == 'localog') {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => LocalogScreen(userId: currentUser!.uid),
             ),
-          ),
-          (Route<dynamic> route) => false,
-        );
+            (Route<dynamic> route) => false,
+          );
+        } else {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => HomeScreen(
+                userId: currentUser!.uid,
+                initialTranche: data?['favoriteTranche'],
+                interfaceType: interfaceType,
+              ),
+            ),
+            (Route<dynamic> route) => false,
+          );
+        }
       } else {
         if (mounted) {
           setState(() => _isProcessingLogin = false);
@@ -335,25 +396,52 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                         const SizedBox(height: 30),
                         // Espace entre les deux lignes de logos
 
-                        // --- NOUVEAU LOGO AMCR (Centré en dessous) ---
-                        GestureDetector(
-                          onTap: () =>
-                              _startLoginProcess(interfaceType: 'amcr'),
-                          child: Tooltip(
-                            message: 'Accès interface AMCR',
-                            child: Image.asset(
-                              'assets/images/AMCR.png',
-                              // Assurez-vous que l'image est dans vos assets
-                              height: 110,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Icon(
-                                  Icons.engineering,
-                                  size: 110,
-                                  color: Colors.blueGrey,
-                                );
-                              },
+                        // --- LOGOS AMCR ET LOCALOG CÔTE À CÔTE ---
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // --- LOGO AMCR ---
+                            GestureDetector(
+                              onTap: () =>
+                                  _startLoginProcess(interfaceType: 'amcr'),
+                              child: Tooltip(
+                                message: 'Accès interface AMCR',
+                                child: Image.asset(
+                                  'assets/images/AMCR.png',
+                                  height: 110,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return const Icon(
+                                      Icons.engineering,
+                                      size: 110,
+                                      color: Colors.blueGrey,
+                                    );
+                                  },
+                                ),
+                              ),
                             ),
-                          ),
+
+                            const SizedBox(width: 40),
+
+                            // --- LOGO LOCALOG ---
+                            GestureDetector(
+                              onTap: () =>
+                                  _startLoginProcess(interfaceType: 'localog'),
+                              child: Tooltip(
+                                message: 'Accès interface LocaLog',
+                                child: Image.asset(
+                                  'assets/images/LocaLog.png',
+                                  height: 110,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return const Icon(
+                                      Icons.location_on,
+                                      size: 110,
+                                      color: Colors.blueGrey,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

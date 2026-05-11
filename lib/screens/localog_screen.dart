@@ -4,10 +4,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:excel/excel.dart' hide Border;
+import 'package:path_provider/path_provider.dart';
+import 'package:open_file/open_file.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'package:file_saver/file_saver.dart';
 import 'home_screen.dart';
 import 'chantier_plus_screen.dart';
 import 'role_selection_screen.dart';
-import '../widgets/tranche_selector.dart';
 
 class LocalogScreen extends StatefulWidget {
   final String userId;
@@ -23,7 +28,26 @@ class _LocalogScreenState extends State<LocalogScreen> {
   late MobileScannerController cameraController;
   final TextEditingController _searchController = TextEditingController();
   bool _isScannerOpen = false;
-  final List<String> _materiels = ['UFS', 'BFS', 'SPMB', 'Déprimogène'];
+  bool _isExporting = false;
+  final List<String> _materiels = [
+    'UFS',
+    'Bouteille',
+    'Déprimogène',
+    'MIP10',
+    'Sonde MIP10',
+    'SPMB',
+    'BFS',
+    'Rallonge Electrique',
+    'Adaptateur Electrique',
+    'MEDGV',
+    'MEDCP',
+    'Lot Canon lumière',
+    'Orfo',
+    'Pompe à membrane',
+    'Nettoyeur HP',
+    'Canon à Mousse',
+    'Autre → Préciser'
+  ];
   Map<String, dynamic>? _currentInventoryItem;
 
   // Rôles et permissions
@@ -39,6 +63,13 @@ class _LocalogScreenState extends State<LocalogScreen> {
   String _searchQuery = '';
   String? _selectedFilterTR;
   String? _selectedFilterRetour;
+
+  bool get _isAdmin => _userRoles.contains('administrateur');
+  bool get _isChefChantier =>
+      _userRoles.contains('chef_de_chantier') ||
+      _userRoles.contains('chef_de_chantier_amcr');
+
+  bool get _canExportExcel => _isAdmin || _isChefChantier;
 
   @override
   void initState() {
@@ -111,7 +142,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
 
   Future<void> _handleQRCodeScanned(String qrCode) async {
     try {
-      print('QR Code scanné : $qrCode');
+      debugPrint('QR Code scanné : $qrCode');
       // Nettoyage du code QR pour l'utiliser comme ID Firestore (pas de /)
       final sanitizedId = qrCode.replaceAll('/', '_').replaceAll(' ', '_');
 
@@ -146,7 +177,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
         }
       }
     } catch (e) {
-      print('Erreur Firestore lors du scan : $e');
+      debugPrint('Erreur Firestore lors du scan : $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -169,6 +200,55 @@ class _LocalogScreenState extends State<LocalogScreen> {
         initialData: data ?? _currentInventoryItem,
         userId: widget.userId,
         materiels: _materiels,
+        isAdmin: _isAdmin,
+      ),
+    );
+  }
+
+  void _confirmDelete(String qrCode) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer le matériel ?'),
+        content: Text(
+            'Voulez-vous vraiment supprimer définitivement le matériel $qrCode de l\'inventaire ? Cette action est irréversible.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await FirebaseFirestore.instance
+                    .collection('localog_inventory')
+                    .doc(qrCode)
+                    .delete();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Matériel supprimé avec succès'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Erreur lors de la suppression : $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child:
+                const Text('Supprimer', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
@@ -215,6 +295,345 @@ class _LocalogScreenState extends State<LocalogScreen> {
         ],
       ),
     );
+  }
+
+  void _showScanChoice(bool isManual) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Type de saisie'),
+        content: const Text(
+            'Souhaitez-vous effectuer un scan unique ou un multi-scan ?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (isManual) {
+                _showManualEntryDialog();
+              } else {
+                _openScanner();
+              }
+            },
+            child: const Text('Unique'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _startMultiScanFlow(isManual);
+            },
+            child: const Text('Multi-scan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _startMultiScanFlow(bool isManual) {
+    final TextEditingController localController = TextEditingController();
+    String? selectedTR;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Configuration Multi-scan'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Veuillez renseigner le local et la TR communs.'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: localController,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'Local',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: selectedTR,
+                decoration: const InputDecoration(
+                  labelText: 'TR',
+                  border: OutlineInputBorder(),
+                ),
+                items: List.generate(10, (index) => index.toString())
+                    .map(
+                        (val) => DropdownMenuItem(value: val, child: Text(val)))
+                    .toList(),
+                onChanged: (val) => setDialogState(() => selectedTR = val),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (localController.text.isNotEmpty && selectedTR != null) {
+                  Navigator.pop(ctx);
+                  if (isManual) {
+                    _runManualMultiScan(
+                        localController.text.toUpperCase(), selectedTR!);
+                  } else {
+                    _runCameraMultiScan(
+                        localController.text.toUpperCase(), selectedTR!);
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Local et TR obligatoires')),
+                  );
+                }
+              },
+              child: const Text('Valider'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _runManualMultiScan(String local, String tr) {
+    final List<String> codes = [];
+    final TextEditingController codeController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Saisie Multi-manuelle'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: codeController,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  labelText: 'Code QR',
+                  hintText: 'Entrez un code',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.add_circle, color: Colors.green),
+                    onPressed: () {
+                      final val = codeController.text.trim().toUpperCase();
+                      if (val.isNotEmpty && !codes.contains(val)) {
+                        setDialogState(() {
+                          codes.add(val);
+                          codeController.clear();
+                        });
+                      }
+                    },
+                  ),
+                ),
+                onSubmitted: (val) {
+                  if (val.isNotEmpty && !codes.contains(val.toUpperCase())) {
+                    setDialogState(() {
+                      codes.add(val.toUpperCase());
+                      codeController.clear();
+                    });
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 150,
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 8,
+                    children: codes
+                        .map((c) => Chip(
+                              label: Text(c),
+                              onDeleted: () =>
+                                  setDialogState(() => codes.remove(c)),
+                            ))
+                        .toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Annuler')),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                if (codes.isNotEmpty) {
+                  _showMultiScanSummary(codes, local, tr);
+                }
+              },
+              child: const Text('Terminer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _runCameraMultiScan(String local, String tr) async {
+    setState(() => _isScannerOpen = true);
+    final List<String>? results = await Navigator.push<List<String>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MultiQRScannerScreen(controller: cameraController),
+      ),
+    );
+    setState(() => _isScannerOpen = false);
+
+    if (results != null && results.isNotEmpty) {
+      _showMultiScanSummary(results, local, tr);
+    }
+  }
+
+  void _showMultiScanSummary(List<String> codes, String local, String tr) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => MultiScanSummaryDialog(
+        codes: codes,
+        local: local,
+        tr: tr,
+        userId: widget.userId,
+        materiels: _materiels,
+        isAdmin: _isAdmin,
+      ),
+    );
+  }
+
+  Future<void> _exportToExcel() async {
+    setState(() => _isExporting = true);
+
+    try {
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('localog_inventory')
+          .get();
+
+      final excel = Excel.createExcel();
+      const String sheetName = "Inventaire";
+      excel.rename(excel.getDefaultSheet()!, sheetName);
+      final Sheet sheet = excel[sheetName];
+
+      CellStyle headerStyle = CellStyle(
+        bold: true,
+        backgroundColorHex: ExcelColor.fromHexString('#FFC0C0C0'),
+        horizontalAlign: HorizontalAlign.Center,
+      );
+
+      final headers = [
+        'QR Code',
+        'Matériel',
+        'Local',
+        'TR',
+        'Retour',
+        'HS',
+        'Motif HS',
+        'DeD (mSv/h)',
+        'Date Validité',
+        'Dernière Maj',
+        'Par',
+        'Historique'
+      ];
+
+      for (var i = 0; i < headers.length; i++) {
+        var cell =
+            sheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+        cell.value = TextCellValue(headers[i]);
+        cell.cellStyle = headerStyle;
+      }
+
+      for (int i = 0; i < querySnapshot.docs.length; i++) {
+        final doc = querySnapshot.docs[i];
+        final data = doc.data() as Map<String, dynamic>;
+        final rowIndex = i + 1;
+
+        // Formater l'historique complet pour l'Excel
+        final List<dynamic> history = data['history'] ?? [];
+        final String historyText = history.reversed.map((entry) {
+          final String ts = entry['timestamp'] ?? 'N/A';
+          final String action = entry['action'] ?? '';
+          final String author =
+              "${entry['modifiedBy']?['prenom'] ?? entry['createdBy']?['prenom'] ?? ''} ${entry['modifiedBy']?['nom'] ?? entry['createdBy']?['nom'] ?? ''}";
+
+          String details = "";
+          if (action == 'modification' && entry['changes'] != null) {
+            final Map<String, dynamic> changes = entry['changes'];
+            details = " (${changes.keys.join(', ')})";
+          }
+          return "[$ts] $author : $action$details";
+        }).join(' | ');
+
+        final rowData = [
+          doc.id,
+          data['materiel'] ?? '',
+          data['local'] ?? '',
+          data['tr']?.toString() ?? '',
+          data['retour'] ?? '',
+          (data['hs'] == true) ? 'OUI' : 'NON',
+          data['motifHS'] ?? '',
+          data['ded']?.toString() ?? '',
+          data['validityDate'] ?? '',
+          data['lastUpdatedAt'] ?? '',
+          "${data['lastUpdatedBy']?['prenom'] ?? ''} ${data['lastUpdatedBy']?['nom'] ?? ''}",
+          historyText
+        ];
+
+        for (var j = 0; j < rowData.length; j++) {
+          sheet
+              .cell(CellIndex.indexByColumnRow(
+                  columnIndex: j, rowIndex: rowIndex))
+              .value = TextCellValue(rowData[j].toString());
+        }
+      }
+
+      final fileBytes = excel.encode();
+      if (fileBytes == null) throw Exception("Erreur encodage Excel");
+
+      final String fileName =
+          "Inventaire_Localog_${DateTime.now().millisecondsSinceEpoch}";
+
+      if (kIsWeb ||
+          Platform.isWindows ||
+          Platform.isMacOS ||
+          Platform.isLinux) {
+        // Utilisation de FileSaver pour Windows/Web/Desktop
+        await FileSaver.instance.saveFile(
+          name: '$fileName.xlsx',
+          bytes: Uint8List.fromList(fileBytes),
+          mimeType: MimeType.microsoftExcel,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Export terminé ! Consultez votre dossier Téléchargements.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        // Pour Mobile (Android/iOS)
+        final directory = await getTemporaryDirectory();
+        final String filePath = '${directory.path}/$fileName.xlsx';
+        final file = File(filePath);
+        await file.writeAsBytes(fileBytes);
+        await OpenFile.open(filePath);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Erreur export : $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
   }
 
   @override
@@ -490,16 +909,31 @@ class _LocalogScreenState extends State<LocalogScreen> {
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
+          if (_canExportExcel) ...[
+            FloatingActionButton.small(
+              heroTag: 'excel_btn',
+              onPressed: _isExporting ? null : _exportToExcel,
+              backgroundColor: Colors.green.shade700,
+              child: _isExporting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.file_download, color: Colors.white),
+            ),
+            const SizedBox(height: 12),
+          ],
           FloatingActionButton.small(
             heroTag: 'manual_btn',
-            onPressed: _showManualEntryDialog,
+            onPressed: () => _showScanChoice(true),
             backgroundColor: Colors.blueGrey,
             child: const Icon(Icons.keyboard, color: Colors.white),
           ),
           const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: 'scanner_btn',
-            onPressed: _isScannerOpen ? null : _openScanner,
+            onPressed: _isScannerOpen ? null : () => _showScanChoice(false),
             backgroundColor: oMSGreen,
             child: const Icon(Icons.qr_code_scanner, color: Colors.white),
           ),
@@ -516,7 +950,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          print('Firestore Error: ${snapshot.error}');
+          debugPrint('Firestore Error: ${snapshot.error}');
           return Center(
             child: Text(
               'Erreur de chargement\n${snapshot.error.toString().contains('index') ? 'Index manquant' : ''}',
@@ -681,15 +1115,76 @@ class _LocalogScreenState extends State<LocalogScreen> {
                         'Local: ${(data['local'] == null || data['local'].toString().isEmpty) ? 'N/A' : data['local']}${data['tr'] != null ? ' | TR: ${data['tr']}' : ''}',
                       ),
                     const SizedBox(height: 2),
-                    Text(
-                      'QR: $qrCode',
-                      style:
-                          TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'QR: $qrCode',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (data['lastUpdatedAt'] != null)
+                          Builder(builder: (context) {
+                            String displayMaJ =
+                                data['lastUpdatedAt'].toString();
+                            try {
+                              DateTime dt = DateFormat('yyyy-MM-dd HH:mm:ss')
+                                  .parse(displayMaJ);
+                              displayMaJ =
+                                  DateFormat('dd/MM/yyyy HH:mm').format(dt);
+                            } catch (_) {
+                              displayMaJ = displayMaJ.split(' ').first;
+                            }
+                            return Text(
+                              'MaJ: $displayMaJ',
+                              style: TextStyle(
+                                  fontSize: 10, color: Colors.grey.shade500),
+                            );
+                          }),
+                      ],
                     ),
+                    if (data['ded'] != null &&
+                        data['ded'].toString().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade100,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.amber.shade800),
+                          ),
+                          child: Text(
+                            'Dernier DeD: ${data['ded']} mSv/h',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amber.shade900,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 isThreeLine: true,
-                trailing: const Icon(Icons.chevron_right),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_isAdmin)
+                      IconButton(
+                        icon:
+                            const Icon(Icons.delete_outline, color: Colors.red),
+                        tooltip: 'Supprimer ce matériel',
+                        onPressed: () => _confirmDelete(qrCode),
+                      ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
                 onTap: () =>
                     _showInventoryDialog(qrCode, isExisting: true, data: data),
               ),
@@ -701,39 +1196,252 @@ class _LocalogScreenState extends State<LocalogScreen> {
   }
 }
 
-class QRScannerScreen extends StatefulWidget {
+class QRScannerScreen extends StatelessWidget {
   final MobileScannerController controller;
-
   const QRScannerScreen({super.key, required this.controller});
-
-  @override
-  State<QRScannerScreen> createState() => _QRScannerScreenState();
-}
-
-class _QRScannerScreenState extends State<QRScannerScreen> {
-  String? _scannedCode;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scanner QR Code'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.pop(context),
-        ),
+        title: const Text('Scanner un QR Code'),
+        backgroundColor: const Color(0xFF8EBB21),
+        foregroundColor: Colors.white,
       ),
       body: MobileScanner(
-        controller: widget.controller,
+        controller: controller,
         onDetect: (capture) {
           final List<Barcode> barcodes = capture.barcodes;
-          if (barcodes.isNotEmpty && _scannedCode == null) {
-            final code = barcodes.first.rawValue ?? '';
-            setState(() => _scannedCode = code);
-            Navigator.pop(context, code);
+          if (barcodes.isNotEmpty) {
+            final String? code = barcodes.first.rawValue;
+            if (code != null && code.isNotEmpty) {
+              Navigator.pop(context, code);
+            }
           }
         },
       ),
+    );
+  }
+}
+
+class MultiQRScannerScreen extends StatefulWidget {
+  final MobileScannerController controller;
+  const MultiQRScannerScreen({super.key, required this.controller});
+
+  @override
+  State<MultiQRScannerScreen> createState() => _MultiQRScannerScreenState();
+}
+
+class _MultiQRScannerScreenState extends State<MultiQRScannerScreen> {
+  final List<String> _scannedCodes = [];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Multi-scan (${_scannedCodes.length})'),
+        backgroundColor: const Color(0xFF8EBB21),
+        foregroundColor: Colors.white,
+        actions: [
+          if (_scannedCodes.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.check),
+              onPressed: () => Navigator.pop(context, _scannedCodes),
+            )
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: widget.controller,
+            onDetect: (capture) {
+              final List<Barcode> barcodes = capture.barcodes;
+              for (final barcode in barcodes) {
+                final code = barcode.rawValue;
+                if (code != null &&
+                    code.isNotEmpty &&
+                    !_scannedCodes.contains(code)) {
+                  setState(() {
+                    _scannedCodes.add(code);
+                  });
+                  HapticFeedback.lightImpact();
+                }
+              }
+            },
+          ),
+          Positioned(
+            bottom: 20,
+            left: 20,
+            right: 20,
+            child: Container(
+              height: 100,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: _scannedCodes.isEmpty
+                  ? const Center(
+                      child: Text('Scannez vos matériels...',
+                          style: TextStyle(color: Colors.white)))
+                  : ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _scannedCodes.length,
+                      itemBuilder: (context, index) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: Chip(
+                            label: Text(_scannedCodes[index]),
+                            onDeleted: () =>
+                                setState(() => _scannedCodes.removeAt(index)),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+class MultiScanSummaryDialog extends StatefulWidget {
+  final List<String> codes;
+  final String local;
+  final String tr;
+  final String userId;
+  final List<String> materiels;
+  final bool isAdmin;
+
+  const MultiScanSummaryDialog({
+    super.key,
+    required this.codes,
+    required this.local,
+    required this.tr,
+    required this.userId,
+    required this.materiels,
+    this.isAdmin = false,
+  });
+
+  @override
+  State<MultiScanSummaryDialog> createState() => _MultiScanSummaryDialogState();
+}
+
+class _MultiScanSummaryDialogState extends State<MultiScanSummaryDialog> {
+  late List<String> _allCodes;
+
+  @override
+  void initState() {
+    super.initState();
+    _allCodes = List.from(widget.codes);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Matériels à traiter (${_allCodes.length})'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Local: ${widget.local} | TR: ${widget.tr}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            const Divider(),
+            if (_allCodes.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(20.0),
+                child: Text('Tous les matériels ont été traités.',
+                    style: TextStyle(color: Colors.green)),
+              )
+            else
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _allCodes.length,
+                  itemBuilder: (context, index) {
+                    final code = _allCodes[index];
+                    return ListTile(
+                      leading:
+                          const Icon(Icons.qr_code_2, color: Colors.blueGrey),
+                      title: Text(code),
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                      onTap: () => _processItem(code),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(_allCodes.isEmpty ? 'Fermer' : 'Arrêter le batch'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _processItem(String code) async {
+    final sanitizedId = code.replaceAll('/', '_').replaceAll(' ', '_');
+
+    final doc = await FirebaseFirestore.instance
+        .collection('localog_inventory')
+        .doc(sanitizedId)
+        .get();
+
+    if (mounted) {
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => InventoryFormDialog(
+          qrCode: sanitizedId,
+          isExisting: doc.exists,
+          initialData: doc.data(),
+          userId: widget.userId,
+          materiels: widget.materiels,
+          batchLocal: widget.local,
+          batchTR: widget.tr,
+          isAdmin: widget.isAdmin,
+        ),
+      );
+
+      if (result == true) {
+        setState(() {
+          _allCodes.remove(code);
+        });
+
+        if (_allCodes.isEmpty && mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Batch terminé avec succès'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    }
+  }
+}
+
+class _DeDInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    if (newValue.text.isEmpty) return newValue;
+
+    String digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return const TextEditingValue();
+
+    double value = double.parse(digits) / 1000;
+    String newText = value.toStringAsFixed(3).replaceAll('.', ',');
+
+    return TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newText.length),
     );
   }
 }
@@ -744,6 +1452,9 @@ class InventoryFormDialog extends StatefulWidget {
   final Map<String, dynamic>? initialData;
   final String userId;
   final List<String> materiels;
+  final String? batchLocal;
+  final String? batchTR;
+  final bool isAdmin;
 
   const InventoryFormDialog({
     super.key,
@@ -752,6 +1463,9 @@ class InventoryFormDialog extends StatefulWidget {
     this.initialData,
     required this.userId,
     required this.materiels,
+    this.batchLocal,
+    this.batchTR,
+    this.isAdmin = false,
   });
 
   @override
@@ -761,14 +1475,19 @@ class InventoryFormDialog extends StatefulWidget {
 class _InventoryFormDialogState extends State<InventoryFormDialog> {
   String _selectedMateriel = '';
   DateTime? _validityDate;
+  final TextEditingController _customMaterialController =
+      TextEditingController();
   final TextEditingController _localController = TextEditingController();
   final TextEditingController _motifHSController = TextEditingController();
+  final TextEditingController _dedController = TextEditingController();
+  final TextEditingController _qrController = TextEditingController();
   bool _isHS = false;
   String? _selectedTR;
   String? _selectedRetour;
   bool _isLoading = false;
   bool _showHistory = false;
   List<String> _filteredMateriels = [];
+  String _initialDeD = '';
 
   final List<String> _retourOptions = [
     'SUT',
@@ -786,11 +1505,31 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
     String initialMotifHS = '';
 
     if (widget.isExisting && widget.initialData != null) {
-      _selectedMateriel =
+      String rawMateriel =
           (widget.initialData!['materiel'] ?? '').toString().trim();
+      if (rawMateriel.startsWith('Autre : ')) {
+        _selectedMateriel = 'Autre → Préciser';
+        _customMaterialController.text =
+            rawMateriel.replaceFirst('Autre : ', '');
+      } else {
+        _selectedMateriel = rawMateriel;
+      }
       initialLocal = widget.initialData!['local'] ?? '';
       _isHS = widget.initialData!['hs'] ?? false;
       initialMotifHS = widget.initialData!['motifHS'] ?? '';
+      _initialDeD = widget.initialData!['ded']?.toString() ?? '';
+
+      // Si c'est un matériel spécial et qu'on n'a pas de DeD actuel (mais qu'il existe dans le dernier historique)
+      if (_isSpecialMaterial && _initialDeD.isEmpty) {
+        final history = widget.initialData!['history'] as List<dynamic>?;
+        if (history != null && history.isNotEmpty) {
+          final lastEntry = history.last as Map<String, dynamic>;
+          if (lastEntry['ded'] != null) {
+            _initialDeD = lastEntry['ded'].toString();
+          }
+        }
+      }
+
       final validityStr = widget.initialData!['validityDate'];
       _validityDate =
           validityStr != null ? DateTime.tryParse(validityStr) : null;
@@ -800,14 +1539,17 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
       _selectedMateriel =
           widget.materiels.isNotEmpty ? widget.materiels.first : '';
       _validityDate = null;
-      _selectedTR = null;
+      _selectedTR = widget.batchTR;
       _selectedRetour = null;
       _isHS = false;
+      initialLocal = widget.batchLocal ?? '';
     }
 
     _localController.text = initialLocal;
     _motifHSController.text = initialMotifHS;
+    _dedController.text = _initialDeD;
 
+    _qrController.text = widget.qrCode;
     // Initialisation sécurisée de la liste des matériels
     _updateFilteredMateriels();
   }
@@ -841,9 +1583,23 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
 
   @override
   void dispose() {
+    _customMaterialController.dispose();
     _localController.dispose();
     _motifHSController.dispose();
+    _dedController.dispose();
+    _qrController.dispose();
     super.dispose();
+  }
+
+  bool get _isSpecialMaterial {
+    final specialList = [
+      'Déprimogène',
+      'MEDGV',
+      'MEDCP',
+      'Pompe à membrane',
+      'Orfo'
+    ];
+    return specialList.contains(_selectedMateriel);
   }
 
   Future<void> _selectDate() async {
@@ -859,10 +1615,34 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
   }
 
   Future<void> _saveInventory() async {
+    final qrCodeToSave = _qrController.text.trim();
+    if (qrCodeToSave.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Le QR Code ne peut pas être vide')),
+      );
+      return;
+    }
+
     final localValue = _localController.text.trim().toUpperCase();
     final motifHSValue = _motifHSController.text.trim();
+    final dedValue = _dedController.text.trim();
+
+    final finalMateriel = _selectedMateriel == 'Autre → Préciser'
+        ? 'Autre : ${_customMaterialController.text.trim()}'
+        : _selectedMateriel;
 
     // Validation
+    if (_selectedMateriel == 'Autre → Préciser' &&
+        _customMaterialController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Veuillez préciser le matériel'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     if (_selectedRetour == null) {
       if (localValue.isEmpty || _selectedTR == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -871,6 +1651,36 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
             backgroundColor: Colors.orange,
           ),
         );
+        return;
+      }
+    }
+
+    if (_isSpecialMaterial && dedValue.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Le Débit de Dose (DeD) est obligatoire pour ce matériel'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (qrCodeToSave != widget.qrCode) {
+      final existingDoc = await FirebaseFirestore.instance
+          .collection('localog_inventory')
+          .doc(qrCodeToSave)
+          .get();
+      if (existingDoc.exists) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Ce QR Code est déjà utilisé par un autre matériel'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
         return;
       }
     }
@@ -902,13 +1712,14 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
 
       // Préparer les données d'inventaire
       Map<String, dynamic> inventoryData = {
-        'qrCode': widget.qrCode,
-        'materiel': _selectedMateriel,
+        'qrCode': qrCodeToSave,
+        'materiel': finalMateriel,
         'local': localValue,
         'tr': _selectedTR,
         'retour': _selectedRetour,
         'hs': _isHS,
         'motifHS': _isHS ? motifHSValue : '',
+        'ded': _isSpecialMaterial ? dedValue : null,
         'validityDate': _validityDate?.toIso8601String() ?? 'N/A',
         'lastUpdatedBy': {
           'uid': currentUser.uid,
@@ -927,12 +1738,16 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
 
         // On enregistre les changements précis
         Map<String, dynamic> changes = {};
-        if (widget.initialData!['materiel'] != _selectedMateriel) {
+        if (qrCodeToSave != widget.qrCode) {
+          changes['qrCode'] = {'old': widget.qrCode, 'new': qrCodeToSave};
+        }
+        if (widget.initialData!['materiel'] != finalMateriel) {
           changes['materiel'] = {
             'old': widget.initialData!['materiel'],
-            'new': _selectedMateriel
+            'new': finalMateriel
           };
         }
+        // ... (suite des changements existants)
         if (widget.initialData!['local'] != localValue) {
           changes['local'] = {
             'old': widget.initialData!['local'],
@@ -970,6 +1785,13 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
             'new': _validityDate?.toIso8601String() ?? 'N/A'
           };
         }
+        if (_isSpecialMaterial &&
+            widget.initialData!['ded']?.toString() != dedValue) {
+          changes['ded'] = {
+            'old': widget.initialData!['ded'] ?? 'N/A',
+            'new': dedValue
+          };
+        }
 
         if (changes.isNotEmpty) {
           history.add({
@@ -983,6 +1805,25 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
               'roles': userData['roles'] ?? [],
             },
           });
+        } else {
+          // Aucun changement, on marque comme vérifié / vu
+          Map<String, dynamic> verificationEntry = {
+            'timestamp': formattedDate,
+            'action': 'vérification',
+            'modifiedBy': {
+              'uid': currentUser.uid,
+              'nom': userData['nom'] ?? 'N/A',
+              'prenom': userData['prenom'] ?? 'N/A',
+              'roles': userData['roles'] ?? [],
+            },
+          };
+
+          // Si c'est un matériel spécial, on enregistre le DeD actuel dans la vérification
+          if (_isSpecialMaterial) {
+            verificationEntry['ded'] = dedValue;
+          }
+
+          history.add(verificationEntry);
         }
         inventoryData['history'] = history;
       } else {
@@ -992,12 +1833,13 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
             'timestamp': formattedDate,
             'action': 'création',
             'data': {
-              'materiel': _selectedMateriel,
+              'materiel': finalMateriel,
               'local': localValue,
               'tr': _selectedTR,
               'retour': _selectedRetour,
               'hs': _isHS,
               'motifHS': _isHS ? motifHSValue : '',
+              'ded': _isSpecialMaterial ? dedValue : null,
               'validityDate': _validityDate?.toIso8601String() ?? 'N/A',
             },
             'createdBy': {
@@ -1013,11 +1855,18 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
       // Enregistrer dans Firestore
       await firestore
           .collection('localog_inventory')
-          .doc(widget.qrCode)
+          .doc(qrCodeToSave)
           .set(inventoryData, SetOptions(merge: true));
 
+      if (qrCodeToSave != widget.qrCode) {
+        await firestore
+            .collection('localog_inventory')
+            .doc(widget.qrCode)
+            .delete();
+      }
+
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Inventaire enregistré avec succès'),
@@ -1061,6 +1910,48 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                       ),
                     ),
                   ),
+                  if (widget.isAdmin)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      tooltip: 'Supprimer définitivement',
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Supprimer le matériel ?'),
+                            content: const Text(
+                                'Voulez-vous vraiment supprimer définitivement ce matériel de l\'inventaire ? Cette action est irréversible.'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Annuler'),
+                              ),
+                              ElevatedButton(
+                                onPressed: () async {
+                                  Navigator.pop(ctx);
+                                  Navigator.pop(context);
+                                  await FirebaseFirestore.instance
+                                      .collection('localog_inventory')
+                                      .doc(widget.qrCode)
+                                      .delete();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content:
+                                          Text('Matériel supprimé avec succès'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                },
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red),
+                                child: const Text('Supprimer',
+                                    style: TextStyle(color: Colors.white)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                   IconButton(
                     icon: const Icon(Icons.close),
                     onPressed: () => Navigator.pop(context),
@@ -1068,35 +1959,24 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                 ],
               ),
               const SizedBox(height: 16),
-              // QR Code (non modifiable)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Code QR',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      widget.qrCode,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
+              const Text('QR Code*'),
+              const SizedBox(height: 5),
+              TextField(
+                controller: _qrController,
+                readOnly: !widget.isAdmin,
+                decoration: InputDecoration(
+                  hintText: 'Code du matériel',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  filled: !widget.isAdmin,
+                  fillColor: !widget.isAdmin ? Colors.grey[200] : null,
+                  suffixIcon: widget.isAdmin
+                      ? const Icon(Icons.edit, size: 18)
+                      : const Icon(Icons.lock_outline, size: 18),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 15),
               // Sélection de matériel
               const Text(
                 'Matériel*',
@@ -1124,6 +2004,42 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                 },
                 hint: const Text('Sélectionner un matériel'),
               ),
+              if (_selectedMateriel == 'Autre → Préciser') ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _customMaterialController,
+                  decoration: InputDecoration(
+                    labelText: 'Préciser le matériel',
+                    hintText: 'Entrez le nom du matériel',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+              if (_isSpecialMaterial) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'Débit de Dose (DeD) maximum*',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _dedController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    _DeDInputFormatter(),
+                  ],
+                  decoration: InputDecoration(
+                    hintText: 'ex: 0356',
+                    suffixText: 'mSv/h',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               // Local et TR
               Row(
@@ -1329,6 +2245,17 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (_isSpecialMaterial && _initialDeD.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Text(
+                          'DeD actuel: $_initialDeD mSv/h',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueAccent,
+                          ),
+                        ),
+                      ),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -1386,6 +2313,12 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                               List<String> details = [];
                               if (data['action'] == 'création') {
                                 details.add('Création de l\'inventaire');
+                              } else if (data['action'] == 'vérification') {
+                                String label = 'Vérifié (aucun changement)';
+                                if (data['ded'] != null) {
+                                  label += ' - DeD: ${data['ded']} mSv/h';
+                                }
+                                details.add(label);
                               } else if (data['changes'] != null) {
                                 final changes =
                                     data['changes'] as Map<String, dynamic>;
@@ -1407,6 +2340,7 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                                   if (key == 'materiel') keyLabel = 'matériel';
                                   if (key == 'hs') keyLabel = 'HS';
                                   if (key == 'motifHS') keyLabel = 'motif HS';
+                                  if (key == 'ded') keyLabel = 'DeD';
                                   if (key == 'validityDate') {
                                     keyLabel = 'date';
                                     // Formater les dates ISO en dd/MM/yyyy pour la lisibilité

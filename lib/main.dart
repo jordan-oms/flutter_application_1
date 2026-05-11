@@ -14,7 +14,7 @@ import 'firebase_options.dart';
 import 'screens/ajouter_repere_screen.dart';
 import 'screens/detail_repere_screen.dart';
 
-const String DEPLOYMENT_ID = "3.2";
+const String DEPLOYMENT_ID = "4.0";
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

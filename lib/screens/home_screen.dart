@@ -12,6 +12,7 @@ import '../model/consigne.dart';
 import '../model/info_chantier.dart';
 import '../model/commentaire.dart';
 import '../model/transfert.dart';
+import '../model/consigne_service.dart';
 
 // Importez vos autres écrans
 import './role_selection_screen.dart';
@@ -69,7 +70,11 @@ class _ConsignesCache {
           oldC.contenu != newC.contenu ||
           oldC.commentairesNonRealisation?.length !=
               newC.commentairesNonRealisation?.length ||
-          oldC.dosimetrieInfo != newC.dosimetrieInfo) {
+          oldC.dosimetrieInfo != newC.dosimetrieInfo ||
+          oldC.idsConsignesRattachees.length !=
+              newC.idsConsignesRattachees.length ||
+          oldC.referencesConsignesRattachees.length !=
+              newC.referencesConsignesRattachees.length) {
         _lastList = newList;
         return true;
       }
@@ -179,6 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
       .collection('app_config')
       .doc('tranches_config');
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ConsigneService _consigneService = ConsigneService();
 
   // On ajoute un raccourci pour savoir si on est en mode lecture seule
   bool get _isReadOnly => widget.isReadOnly;
@@ -426,6 +432,7 @@ class _HomeScreenState extends State<HomeScreen> {
             context,
             MaterialPageRoute(
               builder: (context) => DetailRepereScreen(repereId: repereId),
+              settings: const RouteSettings(name: '/detail_repere'),
             ),
           );
         } else {
@@ -476,7 +483,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const ChantierPlusScreen()),
+      MaterialPageRoute(
+        builder: (context) => const ChantierPlusScreen(),
+        settings: const RouteSettings(name: '/chantier_plus'),
+      ),
     );
   }
 
@@ -558,7 +568,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    final texte = tempController.text.trim();
+                    final String texte = tempController.text.trim();
                     if (texte.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text("Le texte est vide.")));
@@ -570,22 +580,106 @@ class _HomeScreenState extends State<HomeScreen> {
                       return;
                     }
 
-                    final String nouvelId = _consignesRefGlobal.doc().id;
-                    final nouvelleConsigne = Consigne(
-                      id: nouvelId,
-                      tranche: _selectedTranche!,
-                      contenu: texte,
-                      dateEmission: DateTime.now(),
-                      auteurIdCreation: _currentUser!.uid,
-                      auteurNomPrenomCreation: _currentUserNomPrenom,
-                      roleAuteurCreation: _roleDisplay,
-                      estPrioritaire: estPrioritaire,
-                      categorie: selectedCategorie!,
-                      enjeu: selectedEnjeu,
-                    );
+                    // On ferme le premier dialogue avant de lancer la recherche
+                    Navigator.pop(dialogContext);
 
-                    await _addConsigneDB(nouvelleConsigne);
-                    if (mounted) Navigator.pop(dialogContext);
+                    // Demander le rattachement
+                    Consigne? consigneRattachee;
+                    bool veutRattacher = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text("Rattacher à une consigne ?"),
+                            content: const Text(
+                                "Voulez-vous rattacher cette nouvelle consigne à une consigne existante ?"),
+                            actions: [
+                              TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text("NON")),
+                              ElevatedButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text("OUI")),
+                            ],
+                          ),
+                        ) ??
+                        false;
+
+                    if (veutRattacher) {
+                      consigneRattachee = await _showSearchConsigneDialog();
+                      if (consigneRattachee != null) {
+                        print(
+                            "DEBUG: Consigne sélectionnée pour rattachement (popup): ${consigneRattachee.reference}");
+                      }
+                    }
+
+                    try {
+                      String siteCode = "GRA";
+                      String reference = await _consigneService
+                          .generateReference(siteCode, _selectedTranche!);
+
+                      final String nouvelId = _consignesRefGlobal.doc().id;
+                      final nouvelleConsigne = Consigne(
+                        id: nouvelId,
+                        tranche: _selectedTranche!,
+                        contenu: texte,
+                        dateEmission: DateTime.now(),
+                        auteurIdCreation: _currentUser!.uid,
+                        auteurNomPrenomCreation: _currentUserNomPrenom,
+                        roleAuteurCreation: _roleDisplay,
+                        estPrioritaire: estPrioritaire,
+                        categorie: selectedCategorie!,
+                        enjeu: selectedEnjeu,
+                        reference: reference,
+                        site: siteCode,
+                        idsConsignesRattachees: consigneRattachee != null
+                            ? [consigneRattachee.id]
+                            : [],
+                        referencesConsignesRattachees: consigneRattachee != null
+                            ? [consigneRattachee.reference!]
+                            : [],
+                      );
+
+                      await _addConsigneDB(nouvelleConsigne);
+
+                      // Si une consigne a été rattachée, on met à jour la consigne parente
+                      // pour qu'elle pointe aussi vers la nouvelle (bidirectionnel)
+                      if (consigneRattachee != null) {
+                        try {
+                          // On ajoute le nouvel ID et la nouvelle référence à la liste existante de la parente
+                          List<String> nouveauxIds = List.from(
+                              consigneRattachee.idsConsignesRattachees);
+                          if (!nouveauxIds.contains(nouvelleConsigne.id)) {
+                            nouveauxIds.add(nouvelleConsigne.id);
+                          }
+
+                          List<String> nouvellesRefs = List.from(
+                              consigneRattachee.referencesConsignesRattachees);
+                          if (!nouvellesRefs
+                              .contains(nouvelleConsigne.reference!)) {
+                            nouvellesRefs.add(nouvelleConsigne.reference!);
+                          }
+
+                          final consigneParenteMiseAJour =
+                              consigneRattachee.copyWith(
+                            idsConsignesRattachees: nouveauxIds,
+                            referencesConsignesRattachees: nouvellesRefs,
+                          );
+                          await _updateConsigneDB(consigneParenteMiseAJour);
+                          print(
+                              "DEBUG: Lien bidirectionnel créé sur ${consigneRattachee.reference}");
+                        } catch (e) {
+                          print(
+                              "DEBUG: Erreur lors de la création du lien bidirectionnel: $e");
+                          // On ne bloque pas la création de la consigne principale pour autant
+                        }
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("Erreur : $e")),
+                        );
+                      }
+                    }
                   },
                   child: const Text("VALIDER"),
                 ),
@@ -915,11 +1009,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Stream<List<Consigne>> getConsignesStream() {
-    // ... (Cette fonction reste inchangée)
-    if (_selectedTranche == null) {
-      return Stream.value([]);
-    }
-    return _consignesRefGlobal
+    if (_selectedTranche == null) return Stream.value([]);
+
+    final String prefix = _interfaceType == 'amcr' ? 'amcr_' : '';
+    // Désormais on récupère TOUTES les consignes de la tranche (actives et archivées)
+    // Le filtrage se fera au niveau des widgets (HomeScreen pour les actives, ArchiveScreen pour les archives)
+    return _firestore
+        .collection('${prefix}consignes')
         .where('tranche', isEqualTo: _selectedTranche)
         .orderBy('dateEmission', descending: true)
         .snapshots()
@@ -1123,6 +1219,238 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<Consigne?> _showSearchConsigneDialog() async {
+    String searchQuery = "";
+    List<Consigne> results = [];
+    bool isSearching = false;
+
+    return await showDialog<Consigne>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text("Rechercher une consigne"),
+          content: SizedBox(
+            width: double.maxFinite,
+            height:
+                400, // Hauteur fixe pour permettre l'affichage des résultats
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  decoration: const InputDecoration(
+                    hintText: "Référence ou contenu",
+                    suffixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (val) {
+                    searchQuery = val;
+                  },
+                  onSubmitted: (val) async {
+                    setState(() => isSearching = true);
+                    try {
+                      final found = await _consigneService.searchConsignes(
+                        val,
+                        tranche: _selectedTranche,
+                        collectionPrefix:
+                            _interfaceType == 'amcr' ? 'amcr_' : '',
+                      );
+                      setState(() {
+                        results = found;
+                        isSearching = false;
+                      });
+                    } catch (e) {
+                      setState(() => isSearching = false);
+                    }
+                  },
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    if (searchQuery.trim().isEmpty) return;
+                    setState(() => isSearching = true);
+                    try {
+                      final found = await _consigneService.searchConsignes(
+                        searchQuery,
+                        tranche: _selectedTranche,
+                        collectionPrefix:
+                            _interfaceType == 'amcr' ? 'amcr_' : '',
+                      );
+                      setState(() {
+                        results = found;
+                        isSearching = false;
+                      });
+                    } catch (e) {
+                      setState(() => isSearching = false);
+                    }
+                  },
+                  icon: const Icon(Icons.search),
+                  label: const Text("Rechercher"),
+                ),
+                if (isSearching) const LinearProgressIndicator(),
+                if (!isSearching && results.isEmpty && searchQuery.isNotEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 20),
+                    child: Text("Aucun résultat trouvé",
+                        style: TextStyle(color: Colors.grey)),
+                  ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: results.length,
+                    itemBuilder: (context, index) {
+                      final c = results[index];
+                      return ListTile(
+                        title: Text(c.reference ?? "Sans réf"),
+                        subtitle: Text(c.contenu,
+                            maxLines: 2, overflow: TextOverflow.ellipsis),
+                        onTap: () => Navigator.pop(context, c),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("ANNULER")),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showConsigneDetailsPopup(String consigneId) async {
+    // Avec la collection unique, on ne cherche que dans '${prefix}consignes'
+    final String prefix = _interfaceType == 'amcr' ? 'amcr_' : '';
+    DocumentSnapshot doc =
+        await _firestore.collection('${prefix}consignes').doc(consigneId).get();
+
+    if (!doc.exists) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Consigne introuvable.")));
+      }
+      return;
+    }
+
+    final consigne = Consigne.fromJson(doc.data() as Map<String, dynamic>);
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Expanded(child: Text("Consigne ${consigne.reference ?? ''}")),
+            if (consigne.estValidee)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text("ARCHIVÉE",
+                    style:
+                        TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                consigne.contenu,
+                style: TextStyle(
+                  fontSize: 16,
+                  decoration:
+                      consigne.estValidee ? TextDecoration.lineThrough : null,
+                ),
+              ),
+              const Divider(height: 20),
+              _buildDetailRow("Auteur",
+                  "${consigne.auteurNomPrenomCreation} (${consigne.roleAuteurCreation})"),
+              _buildDetailRow("Émise le",
+                  DateFormat('dd/MM/yyyy HH:mm').format(consigne.dateEmission)),
+              if (consigne.categorie != null)
+                _buildDetailRow("Catégorie", consigne.categorie!),
+              if (consigne.enjeu != null)
+                _buildDetailRow("Enjeu", consigne.enjeu!),
+              if (consigne.estValidee) ...[
+                const Divider(height: 20),
+                const Text("Validation",
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.green)),
+                _buildDetailRow(
+                    "Validée par", consigne.nomPrenomValidation ?? "Inconnu"),
+                if (consigne.dateValidation != null)
+                  _buildDetailRow(
+                      "Validée le",
+                      DateFormat('dd/MM/yyyy HH:mm')
+                          .format(consigne.dateValidation!)),
+                if (consigne.commentaireValidation != null &&
+                    consigne.commentaireValidation!.isNotEmpty)
+                  _buildDetailRow(
+                      "Observation", consigne.commentaireValidation!,
+                      isItalic: true, color: Colors.brown),
+                if (consigne.dosimetrieInfo != null)
+                  _buildDetailRow("Dosimétrie", consigne.dosimetrieInfo!,
+                      color: Colors.blue),
+              ],
+              if (consigne.commentairesNonRealisation != null &&
+                  consigne.commentairesNonRealisation!.isNotEmpty) ...[
+                const Divider(height: 20),
+                const Text("Observations de non-réalisation",
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.orange)),
+                ...consigne.commentairesNonRealisation!.map((com) => Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text(
+                        "• ${com.texte} (Par ${com.auteurNomPrenom} le ${DateFormat('dd/MM/yyyy HH:mm').format(com.date)})",
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.orange),
+                      ),
+                    )),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("FERMER")),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value,
+      {bool isItalic = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(fontSize: 13, color: Colors.black87),
+          children: [
+            TextSpan(
+                text: "$label : ",
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(
+              text: value,
+              style: TextStyle(
+                fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _addConsigneDB(Consigne consigne) async {
     // ... (Cette fonction reste inchangée)
     try {
@@ -1159,10 +1487,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- CORRECTION 1 : SIMPLIFICATION DE _updateConsigneDB ---
+  // --- CORRECTION 1 : SIMPLIFICATION DE _updateConsigneDB (COLLECTION UNIQUE) ---
   Future<void> _updateConsigneDB(Consigne consigne) async {
     try {
-      // On vérifie si l'utilisateur est un "éditeur" (Admin, Chef de chantier, etc.)
+      final String prefix = _interfaceType == 'amcr' ? 'amcr_' : '';
+      final String collectionName = '${prefix}consignes';
+
+      final docRef = FirebaseFirestore.instance
+          .collection(collectionName)
+          .doc(consigne.id);
+
       bool userIsEditor = _userRoles.contains(roleAdminString) ||
           _userRoles.contains(roleChefDeChantierString) ||
           _userRoles.contains('chef_de_chantier_amcr') ||
@@ -1170,12 +1504,12 @@ class _HomeScreenState extends State<HomeScreen> {
           _userRoles.contains('referent_amcr');
 
       if (userIsEditor) {
-        // Les éditeurs peuvent tout modifier, on peut garder le .set()
-        await _consignesRefGlobal.doc(consigne.id).set(consigne.toJson());
+        // Pour les éditeurs, on envoie tout l'objet
+        await docRef.set(consigne.toJson(), SetOptions(merge: true));
       } else {
-        // Pour les agents de terrain, on utilise .update() avec UNIQUEMENT les clés autorisées
-        // par les règles Firestore pour éviter le "Permission Denied" sur les champs statiques.
-        await _consignesRefGlobal.doc(consigne.id).update({
+        // Pour les non-éditeurs, on respecte la règle hasOnly de Firestore
+        // Ils ne peuvent modifier que les champs de validation/réalisation
+        await docRef.update({
           'estValidee': consigne.estValidee,
           'dateValidation': consigne.dateValidation != null
               ? Timestamp.fromDate(consigne.dateValidation!)
@@ -1190,10 +1524,14 @@ class _HomeScreenState extends State<HomeScreen> {
               .toList(),
         });
       }
+
+      print(
+          "DEBUG: Consigne ${consigne.reference} mise à jour dans $collectionName (estValidee: ${consigne.estValidee})");
     } catch (e) {
+      print("DEBUG: Erreur _updateConsigneDB sur ${consigne.reference}: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text("Erreur de mise à jour de la consigne: $e")));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Erreur de mise à jour: $e")));
       }
     }
   }
@@ -1391,6 +1729,37 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!mounted || categorieChoisie == null) return;
 
+    // Étape 1.5 : Demander si on veut rattacher à une consigne existante
+    Consigne? consigneRattachee;
+    bool veutRattacher = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Rattacher à une consigne ?"),
+            content: const Text(
+                "Voulez-vous rattacher cette nouvelle consigne à une consigne existante ?"),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text("NON")),
+              ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text("OUI")),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (veutRattacher) {
+      consigneRattachee = await _showSearchConsigneDialog();
+      // On logue si une consigne a été sélectionnée
+      if (consigneRattachee != null) {
+        print(
+            "DEBUG: Consigne sélectionnée pour rattachement: ${consigneRattachee.reference}");
+      } else {
+        print("DEBUG: Aucune consigne sélectionnée ou recherche annulée.");
+      }
+    }
+
     // Étape 2 : Demander si on veut définir un enjeu
     bool veutDefinirEnjeu = await showDialog<bool>(
           context: context,
@@ -1441,21 +1810,80 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
+      String siteCode = "GRA"; // Par défaut, ou à récupérer depuis la config
+
+      print("DEBUG: Tentative d'ajout consigne");
+      print("DEBUG: siteCode=$siteCode, tranche=$_selectedTranche");
+
+      if (_selectedTranche == null) {
+        throw Exception("La tranche sélectionnée est nulle.");
+      }
+
+      print("DEBUG: Appel generateReference...");
+      String reference =
+          await _consigneService.generateReference(siteCode, _selectedTranche!);
+      print("DEBUG: Référence générée: $reference");
+
+      final nouvelId = _consignesRefGlobal.doc().id;
       final nouvelleConsigne = Consigne(
-        id: _consignesRefGlobal.doc().id,
+        id: nouvelId,
         tranche: _selectedTranche!,
         contenu: texte,
         dateEmission: DateTime.now(),
         estPrioritaire: _estPrioritaireNouvelleConsigne,
-        auteurIdCreation: _currentUser!.uid,
+        auteurIdCreation: _currentUser?.uid ?? 'unknown',
         auteurNomPrenomCreation: _currentUserNomPrenom,
         roleAuteurCreation: _roleDisplay,
         categorie: categorieChoisie,
         enjeu: enjeuFinal,
         commentairesNonRealisation: [],
+        reference: reference,
+        site: siteCode,
+        idsConsignesRattachees:
+            consigneRattachee != null ? [consigneRattachee.id] : [],
+        referencesConsignesRattachees:
+            consigneRattachee != null ? [consigneRattachee.reference!] : [],
       );
+
+      print("DEBUG: Tentative d'ajout en DB de la consigne $nouvelId");
       await _addConsigneDB(nouvelleConsigne);
-    } catch (e) {
+      print("DEBUG: Consigne ajoutée avec succès");
+
+      // AJOUT DU LIEN RETOUR (BIDIRECTIONNEL)
+      if (consigneRattachee != null) {
+        try {
+          print(
+              "DEBUG: Tentative de mise à jour de la consigne parente ${consigneRattachee.reference}");
+
+          // On ajoute le nouvel ID et la nouvelle référence à la liste existante de la parente
+          List<String> nouveauxIds =
+              List.from(consigneRattachee.idsConsignesRattachees);
+          if (!nouveauxIds.contains(nouvelleConsigne.id)) {
+            nouveauxIds.add(nouvelleConsigne.id);
+          }
+
+          List<String> nouvellesRefs =
+              List.from(consigneRattachee.referencesConsignesRattachees);
+          if (!nouvellesRefs.contains(nouvelleConsigne.reference!)) {
+            nouvellesRefs.add(nouvelleConsigne.reference!);
+          }
+
+          final consigneParenteMiseAJour = consigneRattachee.copyWith(
+            idsConsignesRattachees: nouveauxIds,
+            referencesConsignesRattachees: nouvellesRefs,
+          );
+          await _updateConsigneDB(consigneParenteMiseAJour);
+          print(
+              "DEBUG: Lien bidirectionnel créé avec succès sur ${consigneRattachee.reference}");
+        } catch (e) {
+          print("DEBUG: Erreur lors de la création du lien bidirectionnel: $e");
+        }
+      }
+
+      _consigneController.clear(); // Vider le champ après ajout
+    } catch (e, stack) {
+      print("DEBUG ERROR: $e");
+      print("DEBUG STACK: $stack");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2312,6 +2740,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onEnregistrerObsNonRealisation:
                 _enregistrerObservationNonRealisation,
             onEnregistrerObsValidation: _enregistrerObservationValidation,
+            onReferenceTap: _showConsigneDetailsPopup,
             formatDate: _formatDateSimple,
           );
         },
@@ -2604,6 +3033,7 @@ class _HomeScreenState extends State<HomeScreen> {
       currentUserNomPrenom: _currentUserNomPrenom,
       roleDisplay: _roleDisplay,
       addConsigneDB: _addConsigneDB,
+      onReferenceTap: _showConsigneDetailsPopup,
     ));
 
     List<BottomNavigationBarItem> navBarItems = [
@@ -2655,7 +3085,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (context) => const ManageTranchesScreen()),
+                        builder: (context) => const ManageTranchesScreen(),
+                        settings:
+                            const RouteSettings(name: '/manage_tranches')),
                   ).then((_) => _loadTranches());
                 },
                 style: ElevatedButton.styleFrom(
@@ -2673,6 +3105,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const GererLesUtilisateursScreen(),
+                      settings:
+                          const RouteSettings(name: '/gerer_utilisateurs'),
                     ),
                   );
                 },
@@ -2784,6 +3218,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           initialTranche: _selectedTranche,
                                           interfaceType: 'consignes',
                                         ),
+                                        settings: const RouteSettings(
+                                            name: '/home_consignes'),
                                       ),
                                     );
                                   }
@@ -2811,6 +3247,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           initialTranche: _selectedTranche,
                                           interfaceType: 'amcr',
                                         ),
+                                        settings: const RouteSettings(
+                                            name: '/home_amcr'),
                                       ),
                                     );
                                   }
@@ -2832,6 +3270,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     MaterialPageRoute(
                                       builder: (context) =>
                                           const ChantierPlusScreen(),
+                                      settings: const RouteSettings(
+                                          name: '/chantier_plus'),
                                     ),
                                   );
                                 },
@@ -2856,6 +3296,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                       builder: (context) => LocalogScreen(
                                         userId: widget.userId ?? '',
                                       ),
+                                      settings:
+                                          const RouteSettings(name: '/localog'),
                                     ),
                                   );
                                 },
@@ -3001,6 +3443,7 @@ class ConsigneItemWidget extends StatefulWidget {
   final Function(Consigne) onSuppression;
   final Function(Consigne, String) onEnregistrerObsNonRealisation;
   final Function(Consigne, String) onEnregistrerObsValidation;
+  final Function(String) onReferenceTap;
   final String Function(DateTime) formatDate;
 
   const ConsigneItemWidget({
@@ -3018,6 +3461,7 @@ class ConsigneItemWidget extends StatefulWidget {
     required this.onSuppression,
     required this.onEnregistrerObsNonRealisation,
     required this.onEnregistrerObsValidation,
+    required this.onReferenceTap,
     required this.formatDate,
   });
 
@@ -3141,14 +3585,62 @@ class _ConsigneItemWidgetState extends State<ConsigneItemWidget>
                       const SizedBox(height: 2),
 
                       // Ligne méta (auteur + date)
-                      Text(
-                        "Créé par : ${c.auteurNomPrenomCreation} • ${c.roleAuteurCreation} • ${widget.formatDate(c.dateEmission)}",
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey.shade600,
-                          fontStyle: FontStyle.italic,
-                        ),
-                        softWrap: true,
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            "Créé par : ${c.auteurNomPrenomCreation} • ${c.roleAuteurCreation} • ${widget.formatDate(c.dateEmission)}",
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey.shade600,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                          if (c.reference != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                c.reference!,
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade900),
+                              ),
+                            ),
+                          ],
+                          if (c.referencesConsignesRattachees.isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            const Icon(Icons.link,
+                                size: 12, color: Colors.grey),
+                            ...c.referencesConsignesRattachees
+                                .asMap()
+                                .entries
+                                .map((entry) {
+                              int idx = entry.key;
+                              String ref = entry.value;
+                              String id = c.idsConsignesRattachees[idx];
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 4.0),
+                                child: InkWell(
+                                  onTap: () => widget.onReferenceTap(id),
+                                  child: Text(
+                                    " lié à $ref",
+                                    style: const TextStyle(
+                                        fontSize: 9,
+                                        color: Colors.blue,
+                                        decoration: TextDecoration.underline),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ],
+                        ],
                       ),
 
                       const SizedBox(height: 2),

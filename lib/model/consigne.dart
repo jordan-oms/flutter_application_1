@@ -23,6 +23,11 @@ class Consigne {
   final bool estNonRealiseeEffectivement;
   final String? dosimetrieInfo;
 
+  final String? reference;
+  final List<String> idsConsignesRattachees;
+  final List<String> referencesConsignesRattachees;
+  final String? site;
+
   Consigne({
     required this.id,
     required this.tranche,
@@ -42,6 +47,10 @@ class Consigne {
     this.commentairesNonRealisation,
     this.estNonRealiseeEffectivement = false,
     this.dosimetrieInfo,
+    this.reference,
+    this.idsConsignesRattachees = const [],
+    this.referencesConsignesRattachees = const [],
+    this.site,
   });
 
   factory Consigne.fromJson(Map<String, dynamic> json) {
@@ -58,6 +67,21 @@ class Consigne {
       parsedCommentairesNonRealisation = rawCommentairesNonRealisation
           .map((data) => Commentaire.fromJson(data as Map<String, dynamic>))
           .toList();
+    }
+
+    // Gestion de la migration des anciens champs simples vers les listes
+    List<String> ids = [];
+    if (json['idsConsignesRattachees'] is List) {
+      ids = List<String>.from(json['idsConsignesRattachees']);
+    } else if (json['idConsigneRattachee'] != null) {
+      ids = [json['idConsigneRattachee'].toString()];
+    }
+
+    List<String> refs = [];
+    if (json['referencesConsignesRattachees'] is List) {
+      refs = List<String>.from(json['referencesConsignesRattachees']);
+    } else if (json['referenceConsigneRattachee'] != null) {
+      refs = [json['referenceConsigneRattachee'].toString()];
     }
 
     return Consigne(
@@ -80,11 +104,15 @@ class Consigne {
       commentairesNonRealisation: parsedCommentairesNonRealisation,
       estNonRealiseeEffectivement: json['estNonRealiseeEffectivement'] == true,
       dosimetrieInfo: json['dosimetrieInfo']?.toString(),
+      reference: json['reference']?.toString(),
+      idsConsignesRattachees: ids,
+      referencesConsignesRattachees: refs,
+      site: json['site']?.toString(),
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {
+    final data = {
       'id': id,
       'tranche': tranche,
       'contenu': contenu,
@@ -106,7 +134,27 @@ class Consigne {
           commentairesNonRealisation?.map((c) => c.toJson()).toList(),
       'estNonRealiseeEffectivement': estNonRealiseeEffectivement,
       'dosimetrieInfo': dosimetrieInfo,
+      'reference': reference,
+      'site': site,
     };
+
+    // Gestion propre des rattachements pour Firestore
+    if (idsConsignesRattachees.isNotEmpty) {
+      data['idsConsignesRattachees'] = idsConsignesRattachees;
+      data['referencesConsignesRattachees'] = referencesConsignesRattachees;
+
+      // Pour la compatibilité avec les anciennes règles "hasOnly" (si non-éditeur)
+      // On met le premier élément de la liste en texte simple
+      data['idConsigneRattachee'] = idsConsignesRattachees.first;
+      data['referenceConsigneRattachee'] = referencesConsignesRattachees.first;
+    } else {
+      data['idsConsignesRattachees'] = [];
+      data['referencesConsignesRattachees'] = [];
+      data['idConsigneRattachee'] = null;
+      data['referenceConsigneRattachee'] = null;
+    }
+
+    return data;
   }
 
   Consigne copyWith({
@@ -128,6 +176,10 @@ class Consigne {
     List<Commentaire>? commentairesNonRealisation,
     bool? estNonRealiseeEffectivement,
     String? dosimetrieInfo,
+    String? reference,
+    List<String>? idsConsignesRattachees,
+    List<String>? referencesConsignesRattachees,
+    String? site,
     bool clearDosimetrieInfo = false,
     bool clearCommentaireValidation = false,
     bool clearDateValidation = false,
@@ -166,6 +218,12 @@ class Consigne {
           estNonRealiseeEffectivement ?? this.estNonRealiseeEffectivement,
       dosimetrieInfo:
           clearDosimetrieInfo ? null : (dosimetrieInfo ?? this.dosimetrieInfo),
+      reference: reference ?? this.reference,
+      idsConsignesRattachees:
+          idsConsignesRattachees ?? this.idsConsignesRattachees,
+      referencesConsignesRattachees:
+          referencesConsignesRattachees ?? this.referencesConsignesRattachees,
+      site: site ?? this.site,
     );
   }
 }

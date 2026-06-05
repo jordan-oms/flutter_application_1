@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' as fs;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -34,7 +35,9 @@ class RoleSelectionScreen extends StatefulWidget {
     return await Navigator.pushAndRemoveUntil<bool?>(
       externalContext,
       MaterialPageRoute(
-          builder: (_) => const RoleSelectionScreen(isSwitching: true)),
+        builder: (_) => const RoleSelectionScreen(isSwitching: true),
+        settings: const RouteSettings(name: '/selection_role'),
+      ),
       (Route<dynamic> route) => false,
     );
   }
@@ -45,7 +48,10 @@ class RoleSelectionScreen extends StatefulWidget {
     if (context.mounted) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+        MaterialPageRoute(
+          builder: (_) => const RoleSelectionScreen(),
+          settings: const RouteSettings(name: '/selection_role'),
+        ),
         (route) => false,
       );
     }
@@ -82,6 +88,16 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
       if (userDoc.exists) {
         final data = userDoc.data()!;
+
+        // --- CONFIGURATION ANALYTICS ---
+        final String nom = data['nom'] ?? 'Inconnu';
+        final String prenom = data['prenom'] ?? 'Inconnu';
+        await FirebaseAnalytics.instance.setUserId(id: currentUser.uid);
+        await FirebaseAnalytics.instance
+            .setUserProperty(name: 'nom', value: nom);
+        await FirebaseAnalytics.instance
+            .setUserProperty(name: 'prenom', value: prenom);
+
         final roles = List<String>.from(data['roles'] ?? []);
         final bool isAdmin = roles.contains('administrateur');
         final bool isAMCRAuthorized = data['isAMCR'] == true;
@@ -98,6 +114,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   initialTranche: data['favoriteTranche'],
                   interfaceType: 'consignes',
                 ),
+                settings: const RouteSettings(name: '/home_consignes'),
               ),
               (Route<dynamic> route) => false);
           return;
@@ -112,6 +129,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   initialTranche: data['favoriteTranche'],
                   interfaceType: 'amcr',
                 ),
+                settings: const RouteSettings(name: '/home_amcr'),
               ),
               (Route<dynamic> route) => false);
           return;
@@ -122,6 +140,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
               context,
               MaterialPageRoute(
                 builder: (_) => LocalogScreen(userId: currentUser.uid),
+                settings: const RouteSettings(name: '/localog'),
               ),
               (Route<dynamic> route) => false);
           return;
@@ -136,6 +155,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                 initialTranche: data['favoriteTranche'],
                 interfaceType: 'consignes',
               ),
+              settings: const RouteSettings(name: '/home_consignes'),
             ),
             (Route<dynamic> route) => false);
         return;
@@ -165,7 +185,9 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
         bool? result = await Navigator.push<bool?>(
           context,
           MaterialPageRoute(
-              builder: (_) => LoginChantierScreen(onSuccess: () {})),
+            builder: (_) => LoginChantierScreen(onSuccess: () {}),
+            settings: const RouteSettings(name: '/login_chantier'),
+          ),
         );
         loginSuccess = result == true;
         currentUser = FirebaseAuth.instance.currentUser;
@@ -179,6 +201,18 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
         if (!mounted) return;
 
         final data = userDoc.data();
+
+        // --- CONFIGURATION ANALYTICS ---
+        if (data != null) {
+          final String nom = data['nom'] ?? 'Inconnu';
+          final String prenom = data['prenom'] ?? 'Inconnu';
+          await FirebaseAnalytics.instance.setUserId(id: currentUser.uid);
+          await FirebaseAnalytics.instance
+              .setUserProperty(name: 'nom', value: nom);
+          await FirebaseAnalytics.instance
+              .setUserProperty(name: 'prenom', value: prenom);
+        }
+
         final roles = List<String>.from(data?['roles'] ?? []);
         final bool isAdmin = roles.contains('administrateur');
         final bool isAMCRAuthorized = data?['isAMCR'] == true;
@@ -222,6 +256,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
             context,
             MaterialPageRoute(
               builder: (_) => LocalogScreen(userId: currentUser!.uid),
+              settings: const RouteSettings(name: '/localog'),
             ),
             (Route<dynamic> route) => false,
           );
@@ -234,6 +269,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                 initialTranche: data?['favoriteTranche'],
                 interfaceType: interfaceType,
               ),
+              settings: RouteSettings(name: '/home_$interfaceType'),
             ),
             (Route<dynamic> route) => false,
           );
@@ -309,6 +345,8 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                                   MaterialPageRoute(
                                     builder: (_) =>
                                         LoginChantierScreen(onSuccess: () {}),
+                                    settings: const RouteSettings(
+                                        name: '/login_chantier'),
                                   ),
                                 );
 
@@ -355,6 +393,8 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
                                     MaterialPageRoute(
                                       builder: (context) =>
                                           const ChantierPlusScreen(),
+                                      settings: const RouteSettings(
+                                          name: '/chantier_plus'),
                                     ),
                                   );
                                 }

@@ -287,6 +287,8 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
                                 MaterialPageRoute(
                                   builder: (context) =>
                                       const CreationDeCompte(),
+                                  settings: const RouteSettings(
+                                      name: '/creation_compte'),
                                 ),
                               );
                             },

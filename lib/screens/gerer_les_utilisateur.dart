@@ -53,6 +53,8 @@ class _GererLesUtilisateursScreenState extends State<GererLesUtilisateursScreen>
             context,
             MaterialPageRoute(
               builder: (_) => const CreationUtilisateurAdminScreen(),
+              settings:
+                  const RouteSettings(name: '/creation_utilisateur_admin'),
             ),
           );
         },

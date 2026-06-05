@@ -131,6 +131,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => QRScannerScreen(controller: cameraController),
+        settings: const RouteSettings(name: '/localog_scanner'),
       ),
     );
     setState(() => _isScannerOpen = false);
@@ -481,6 +482,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => MultiQRScannerScreen(controller: cameraController),
+        settings: const RouteSettings(name: '/localog_multi_scanner'),
       ),
     );
     setState(() => _isScannerOpen = false);
@@ -673,6 +675,8 @@ class _LocalogScreenState extends State<LocalogScreen> {
                                       userId: widget.userId,
                                       interfaceType: 'consignes',
                                     ),
+                                    settings: const RouteSettings(
+                                        name: '/home_consignes'),
                                   ),
                                 );
                               },
@@ -694,6 +698,8 @@ class _LocalogScreenState extends State<LocalogScreen> {
                                       userId: widget.userId,
                                       interfaceType: 'amcr',
                                     ),
+                                    settings:
+                                        const RouteSettings(name: '/home_amcr'),
                                   ),
                                 );
                               },
@@ -714,6 +720,8 @@ class _LocalogScreenState extends State<LocalogScreen> {
                                     builder: (context) =>
                                         const ChantierPlusScreen(),
                                     maintainState: true,
+                                    settings: const RouteSettings(
+                                        name: '/chantier_plus'),
                                   ),
                                 );
                               },

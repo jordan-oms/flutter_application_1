@@ -28,6 +28,7 @@ class ArchiveScreen extends StatefulWidget {
   final String? currentUserNomPrenom;
   final String? roleDisplay;
   final Future<void> Function(Consigne) addConsigneDB;
+  final void Function(String)? onReferenceTap;
 
   const ArchiveScreen({
     super.key,
@@ -47,6 +48,7 @@ class ArchiveScreen extends StatefulWidget {
     this.currentUserNomPrenom,
     this.roleDisplay,
     this.interfaceType = 'consignes',
+    this.onReferenceTap,
   });
 
   @override
@@ -204,6 +206,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         return item.estValidee &&
             memeTranche &&
             (item.contenu.toLowerCase().contains(q) ||
+                (item.reference ?? "").toLowerCase().contains(q) ||
                 item.auteurNomPrenomCreation.toLowerCase().contains(q));
       } else if (item is Transfert) {
         // On filtre les transferts par la tranche d'origine (isolation des archives)
@@ -417,6 +420,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                     selectedTranche: widget.selectedTranche!,
                     interfaceType: widget.interfaceType,
                   ),
+                  settings: const RouteSettings(name: '/export_excel'),
                 ),
               );
             },
@@ -571,9 +575,71 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             ),
           ],
         ),
-        title: Text(c.contenu,
-            style: const TextStyle(
-                decoration: TextDecoration.lineThrough, fontSize: 15)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (c.reference != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.blue.shade100),
+                ),
+                child: Text(
+                  c.reference!,
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade900),
+                ),
+              ),
+            Text(c.contenu,
+                style: const TextStyle(
+                    decoration: TextDecoration.lineThrough, fontSize: 15)),
+            if (c.referencesConsignesRattachees.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: c.referencesConsignesRattachees
+                      .asMap()
+                      .entries
+                      .map((entry) {
+                    int idx = entry.key;
+                    String ref = entry.value;
+                    String? id = c.idsConsignesRattachees.length > idx
+                        ? c.idsConsignesRattachees[idx]
+                        : null;
+
+                    return InkWell(
+                      onTap: () {
+                        if (widget.onReferenceTap != null && id != null) {
+                          widget.onReferenceTap!(id);
+                        }
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.link, size: 12, color: Colors.blue),
+                          const SizedBox(width: 4),
+                          Text(
+                            "Lié à $ref",
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.blue,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+          ],
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -743,7 +809,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                 builder: (context) => ExcelScreen(
                     archives: items,
                     selectedTranche: widget.selectedTranche!,
-                    interfaceType: widget.interfaceType)));
+                    interfaceType: widget.interfaceType),
+                settings: const RouteSettings(name: '/export_excel')));
       },
     );
   }

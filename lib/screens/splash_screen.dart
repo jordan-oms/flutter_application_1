@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../model/activity_logger.dart';
 
 import '../main.dart'; // Pour DEPLOYMENT_ID
 import 'role_selection_screen.dart';
@@ -45,6 +46,7 @@ class _SplashScreenState extends State<SplashScreen> {
       debugPrint(
           "Nouvelle version détectée ($DEPLOYMENT_ID). Déconnexion forcée.");
       if (currentUser != null) {
+        await ActivityLogger().endSession();
         await FirebaseAuth.instance.signOut();
         finalUser = null; // L'utilisateur est maintenant déconnecté
       }
@@ -97,6 +99,7 @@ class _SplashScreenState extends State<SplashScreen> {
         debugPrint(
             "Erreur critique lors du chargement des données utilisateur: $e");
         // En cas d'échec, déconnecter et rediriger est une stratégie sûre.
+        await ActivityLogger().endSession();
         await FirebaseAuth.instance.signOut();
         if (!mounted) return;
         Navigator.of(context).pushReplacement(

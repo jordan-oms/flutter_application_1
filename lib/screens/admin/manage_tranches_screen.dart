@@ -23,6 +23,7 @@ class ManageTranchesScreenState extends State<ManageTranchesScreen> {
   fs.FirebaseFirestore.instance.collection('app_config').doc('tranches_config');
 
   List<String> _tranches = [];
+  List<String> _tranchesMasquees = [];
   bool _isLoading = true;
   String? _error;
 
@@ -60,6 +61,12 @@ class ManageTranchesScreenState extends State<ManageTranchesScreen> {
           _tranches = [];
           debugPrint( // Remplacé print par debugPrint
               "[ManageTranchesScreen - _loadTranches] 'liste_tranches' n'est pas une List dans le document.");
+        }
+        if (data['tranches_masquees'] is List) {
+          _tranchesMasquees = List<String>.from(
+              data['tranches_masquees'].map((item) => item.toString()));
+        } else {
+          _tranchesMasquees = [];
         }
       } else {
         _tranches = [];
@@ -206,6 +213,44 @@ class ManageTranchesScreenState extends State<ManageTranchesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(
               "Erreur Firestore lors de l'ajout de la tranche: $e")),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _toggleVisibility(String tranche) async {
+    setState(() => _isLoading = true);
+    try {
+      bool estMasquee = _tranchesMasquees.contains(tranche);
+      if (estMasquee) {
+        await _tranchesConfigRef.update({
+          'tranches_masquees': fs.FieldValue.arrayRemove([tranche])
+        });
+      } else {
+        await _tranchesConfigRef.update({
+          'tranches_masquees': fs.FieldValue.arrayUnion([tranche])
+        });
+      }
+      await _loadTranches();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(estMasquee 
+              ? "La tranche '$tranche' est maintenant visible par tous." 
+              : "La tranche '$tranche' est désormais masquée pour les utilisateurs."),
+            backgroundColor: estMasquee ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("[ManageTranchesScreen - _toggleVisibility] Erreur: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Erreur lors du changement de visibilité: $e")),
         );
       }
     } finally {
@@ -399,14 +444,33 @@ class ManageTranchesScreenState extends State<ManageTranchesScreen> {
                               style: const TextStyle(
                                   fontWeight:
                                   FontWeight.w500)),
-                          trailing: IconButton(
-                            icon: const Icon(
-                                Icons.delete_outline,
-                                color: Colors.red),
-                            tooltip:
-                            "Supprimer cette tranche",
-                            onPressed: () =>
-                                _deleteTranche(tranche),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(
+                                  _tranchesMasquees.contains(tranche)
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: _tranchesMasquees.contains(tranche)
+                                      ? Colors.grey
+                                      : Colors.blue,
+                                ),
+                                tooltip: _tranchesMasquees.contains(tranche)
+                                    ? "Rendre visible pour les utilisateurs"
+                                    : "Masquer pour les utilisateurs",
+                                onPressed: () => _toggleVisibility(tranche),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.red),
+                                tooltip:
+                                "Supprimer cette tranche",
+                                onPressed: () =>
+                                    _deleteTranche(tranche),
+                              ),
+                            ],
                           ),
                         ),
                       );

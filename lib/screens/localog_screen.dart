@@ -10,6 +10,8 @@ import 'package:open_file/open_file.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:file_saver/file_saver.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image_picker/image_picker.dart';
 import 'home_screen.dart';
 import 'chantier_plus_screen.dart';
 import 'role_selection_screen.dart';
@@ -48,8 +50,6 @@ class _LocalogScreenState extends State<LocalogScreen> {
     'Canon à Mousse',
     'Autre → Préciser'
   ];
-  Map<String, dynamic>? _currentInventoryItem;
-
   // Rôles et permissions
   bool _hasConsignes = false;
   bool _hasAMCR = false;
@@ -134,71 +134,83 @@ class _LocalogScreenState extends State<LocalogScreen> {
         settings: const RouteSettings(name: '/localog_scanner'),
       ),
     );
+    
+    if (!mounted) return;
     setState(() => _isScannerOpen = false);
 
     if (result != null && result.isNotEmpty) {
-      await _handleQRCodeScanned(result);
+      await _handleQRCodeLookup(result);
     }
   }
 
-  Future<void> _handleQRCodeScanned(String qrCode) async {
-    try {
-      debugPrint('QR Code scanné : $qrCode');
-      // Nettoyage du code QR pour l'utiliser comme ID Firestore (pas de /)
-      final sanitizedId = qrCode.replaceAll('/', '_').replaceAll(' ', '_');
+  Future<void> _handleQRCodeLookup(String code) async {
+    // Nettoyage au cas où
+    final sanitizedCode = code.trim().toUpperCase();
 
-      final auth = FirebaseAuth.instance;
-      final currentUser = auth.currentUser;
-      if (currentUser == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Erreur: Utilisateur non authentifié'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
+    // Recherche souple : on récupère tout pour filtrer (ou on peut optimiser si la base est grande)
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('localog_inventory')
+        .get();
 
-      final firestore = FirebaseFirestore.instance;
-      final inventoryDoc = await firestore
-          .collection('localog_inventory')
-          .doc(sanitizedId)
-          .get();
+    if (!mounted) return;
 
-      if (mounted) {
-        if (inventoryDoc.exists) {
-          final data = inventoryDoc.data();
-          setState(() => _currentInventoryItem = data);
-          _showInventoryDialog(sanitizedId, isExisting: true, data: data);
-        } else {
-          setState(() => _currentInventoryItem = null);
-          _showInventoryDialog(sanitizedId, isExisting: false);
-        }
-      }
-    } catch (e) {
-      debugPrint('Erreur Firestore lors du scan : $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur Cloud : $e'),
-            backgroundColor: Colors.red,
+    // Filtrage local pour trouver les correspondances partielles (ex: GRA020 dans LODEPAMI1600-GRA020)
+    final matchingDocs = querySnapshot.docs.where((doc) {
+      final String qrCodeInDb = (doc.data()['qrCode'] ?? '').toString().toUpperCase();
+      return qrCodeInDb.contains(sanitizedCode);
+    }).toList();
+
+    if (matchingDocs.isEmpty) {
+      _openInventoryForm(sanitizedCode, false, null);
+    } else if (matchingDocs.length == 1) {
+      final doc = matchingDocs.first;
+      _openInventoryForm(
+          doc.data()['qrCode'] ?? sanitizedCode, true, doc.data());
+    } else {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Résultats pour "$sanitizedCode"'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ...matchingDocs.map((doc) {
+                final data = doc.data();
+                return ListTile(
+                  title: Text(data['qrCode'] ?? 'Inconnu'),
+                  subtitle: Text(
+                      '${data['materiel'] ?? ''} - ${data['local'] ?? '?'}'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openInventoryForm(data['qrCode'], true, data);
+                  },
+                );
+              }),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.add),
+                title: const Text('Créer un nouveau matricule'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openInventoryForm(sanitizedCode, false, null);
+                },
+              ),
+            ],
           ),
-        );
-      }
+        ),
+      );
     }
   }
 
-  void _showInventoryDialog(String qrCode,
-      {required bool isExisting, Map<String, dynamic>? data}) {
+  void _openInventoryForm(
+      String qrCode, bool isExisting, Map<String, dynamic>? data) {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => InventoryFormDialog(
         qrCode: qrCode,
         isExisting: isExisting,
-        initialData: data ?? _currentInventoryItem,
+        initialData: data,
         userId: widget.userId,
         materiels: _materiels,
         isAdmin: _isAdmin,
@@ -222,14 +234,22 @@ class _LocalogScreenState extends State<LocalogScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               try {
-                await FirebaseFirestore.instance
+                // On cherche tous les documents correspondants au qrCode
+                final snapshots = await FirebaseFirestore.instance
                     .collection('localog_inventory')
-                    .doc(qrCode)
-                    .delete();
+                    .where('qrCode', isEqualTo: qrCode)
+                    .get();
+                
+                final batch = FirebaseFirestore.instance.batch();
+                for (var doc in snapshots.docs) {
+                  batch.delete(doc.reference);
+                }
+                await batch.commit();
+
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Matériel supprimé avec succès'),
+                      content: Text('Matériel(s) supprimé(s) avec succès'),
                       backgroundColor: Colors.green,
                     ),
                   );
@@ -288,7 +308,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
               final code = manualController.text.trim().toUpperCase();
               if (code.isNotEmpty) {
                 Navigator.pop(ctx);
-                _handleQRCodeScanned(code);
+                _handleQRCodeLookup(code);
               }
             },
             child: const Text('Valider'),
@@ -360,8 +380,8 @@ class _LocalogScreenState extends State<LocalogScreen> {
                   border: OutlineInputBorder(),
                 ),
                 items: List.generate(10, (index) => index.toString())
-                    .map(
-                        (val) => DropdownMenuItem(value: val, child: Text(val)))
+                    .map((val) =>
+                        DropdownMenuItem(value: val, child: Text('TR $val')))
                     .toList(),
                 onChanged: (val) => setDialogState(() => selectedTR = val),
               ),
@@ -406,12 +426,13 @@ class _LocalogScreenState extends State<LocalogScreen> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Saisie Multi-manuelle'),
+          title: Text('Saisie Multi ($local - TR $tr)'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: codeController,
+                autofocus: true,
                 textCapitalization: TextCapitalization.characters,
                 decoration: InputDecoration(
                   labelText: 'Code QR',
@@ -462,13 +483,13 @@ class _LocalogScreenState extends State<LocalogScreen> {
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Annuler')),
             ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                if (codes.isNotEmpty) {
-                  _showMultiScanSummary(codes, local, tr);
-                }
-              },
-              child: const Text('Terminer'),
+              onPressed: codes.isEmpty
+                  ? null
+                  : () {
+                      Navigator.pop(ctx);
+                      _showMultiScanSummary(codes, local, tr);
+                    },
+              child: Text('Suivant (${codes.length})'),
             ),
           ],
         ),
@@ -477,18 +498,72 @@ class _LocalogScreenState extends State<LocalogScreen> {
   }
 
   void _runCameraMultiScan(String local, String tr) async {
-    setState(() => _isScannerOpen = true);
-    final List<String>? results = await Navigator.push<List<String>>(
+    final List<String> scannedCodes = [];
+
+    await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MultiQRScannerScreen(controller: cameraController),
-        settings: const RouteSettings(name: '/localog_multi_scanner'),
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: Text('Multi-scan ($local - TR $tr)'),
+            backgroundColor: const Color(0xFF8EBB21),
+            foregroundColor: Colors.white,
+            actions: [
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: StatefulBuilder(
+                    builder: (context, setStateInternal) => Text(
+                      '${scannedCodes.length} scans',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          body: Stack(
+            children: [
+              MobileScanner(
+                controller: cameraController,
+                onDetect: (capture) {
+                  final List<Barcode> barcodes = capture.barcodes;
+                  for (final barcode in barcodes) {
+                    final String? code = barcode.rawValue;
+                    if (code != null && !scannedCodes.contains(code)) {
+                      scannedCodes.add(code);
+                      HapticFeedback.heavyImpact();
+                      debugPrint('Scanned: $code');
+                    }
+                  }
+                },
+              ),
+              Positioned(
+                bottom: 40,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 32, vertical: 16),
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('TERMINER LE SCAN'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
-    setState(() => _isScannerOpen = false);
 
-    if (results != null && results.isNotEmpty) {
-      _showMultiScanSummary(results, local, tr);
+    if (scannedCodes.isNotEmpty && mounted) {
+      _showMultiScanSummary(scannedCodes, local, tr);
     }
   }
 
@@ -550,7 +625,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
 
       for (int i = 0; i < querySnapshot.docs.length; i++) {
         final doc = querySnapshot.docs[i];
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final rowIndex = i + 1;
 
         // Formater l'historique complet pour l'Excel
@@ -564,13 +639,25 @@ class _LocalogScreenState extends State<LocalogScreen> {
           String details = "";
           if (action == 'modification' && entry['changes'] != null) {
             final Map<String, dynamic> changes = entry['changes'];
-            details = " (${changes.keys.join(', ')})";
+            List<String> changeLogs = [];
+            changes.forEach((key, value) {
+              changeLogs.add("$key: ${value['old']}->${value['new']}");
+            });
+            details = " (${changeLogs.join(', ')})";
           }
           return "[$ts] $author : $action$details";
-        }).join(' | ');
+        }).join('\n');
+
+        String displayValidity = data['validityDate'] ?? 'N/A';
+        if (displayValidity != 'N/A') {
+          try {
+            displayValidity = DateFormat('dd/MM/yyyy')
+                .format(DateTime.parse(displayValidity));
+          } catch (_) {}
+        }
 
         final rowData = [
-          doc.id,
+          data['qrCode'] ?? doc.id,
           data['materiel'] ?? '',
           data['local'] ?? '',
           data['tr']?.toString() ?? '',
@@ -578,7 +665,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
           (data['hs'] == true) ? 'OUI' : 'NON',
           data['motifHS'] ?? '',
           data['ded']?.toString() ?? '',
-          data['validityDate'] ?? '',
+          displayValidity,
           data['lastUpdatedAt'] ?? '',
           "${data['lastUpdatedBy']?['prenom'] ?? ''} ${data['lastUpdatedBy']?['nom'] ?? ''}",
           historyText
@@ -609,15 +696,14 @@ class _LocalogScreenState extends State<LocalogScreen> {
           mimeType: MimeType.microsoftExcel,
         );
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                  'Export terminé ! Consultez votre dossier Téléchargements.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Export terminé ! Consultez votre dossier Téléchargements.'),
+            backgroundColor: Colors.green,
+          ),
+        );
       } else {
         // Pour Mobile (Android/iOS)
         final directory = await getTemporaryDirectory();
@@ -627,12 +713,11 @@ class _LocalogScreenState extends State<LocalogScreen> {
         await OpenFile.open(filePath);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Erreur export : $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Erreur export : $e'), backgroundColor: Colors.red),
+      );
     } finally {
       if (mounted) setState(() => _isExporting = false);
     }
@@ -840,7 +925,8 @@ class _LocalogScreenState extends State<LocalogScreen> {
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: _selectedFilterTR,
+                        key: ValueKey('filter_tr_$_selectedFilterTR'),
+                        initialValue: _selectedFilterTR,
                         isExpanded: true,
                         decoration: InputDecoration(
                           labelText: 'TR',
@@ -870,7 +956,8 @@ class _LocalogScreenState extends State<LocalogScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: _selectedFilterRetour,
+                        key: ValueKey('filter_retour_$_selectedFilterRetour'),
+                        initialValue: _selectedFilterRetour,
                         isExpanded: true,
                         decoration: InputDecoration(
                           labelText: 'Retour',
@@ -1004,15 +1091,36 @@ class _LocalogScreenState extends State<LocalogScreen> {
         }).toList();
 
         if (filteredDocs.isEmpty) {
-          return const Center(
-              child: Text('Aucun matériel ne correspond à ces critères'));
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
+                const SizedBox(height: 16),
+                Text(
+                  'Aucun matériel trouvé',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                ),
+                if (_searchQuery.isNotEmpty || _selectedFilterTR != null || _selectedFilterRetour != null)
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _searchController.clear();
+                      _searchQuery = '';
+                      _selectedFilterTR = null;
+                      _selectedFilterRetour = null;
+                    }),
+                    child: const Text('Réinitialiser les filtres'),
+                  ),
+              ],
+            ),
+          );
         }
 
         return ListView.builder(
           itemCount: filteredDocs.length,
           itemBuilder: (ctx, index) {
             final data = filteredDocs[index].data() as Map<String, dynamic>;
-            final qrCode = filteredDocs[index].id;
+            final String qrCode = data['qrCode'] ?? filteredDocs[index].id;
 
             // Logique de couleur et alertes (HS et Recalification)
             bool isHS = data['hs'] == true;
@@ -1193,8 +1301,7 @@ class _LocalogScreenState extends State<LocalogScreen> {
                     const Icon(Icons.chevron_right),
                   ],
                 ),
-                onTap: () =>
-                    _showInventoryDialog(qrCode, isExisting: true, data: data),
+                onTap: () => _openInventoryForm(qrCode, true, data),
               ),
             );
           },
@@ -1204,29 +1311,283 @@ class _LocalogScreenState extends State<LocalogScreen> {
   }
 }
 
-class QRScannerScreen extends StatelessWidget {
+class QRScannerScreen extends StatefulWidget {
   final MobileScannerController controller;
   const QRScannerScreen({super.key, required this.controller});
+
+  @override
+  State<QRScannerScreen> createState() => _QRScannerScreenState();
+}
+
+class _QRScannerScreenState extends State<QRScannerScreen> {
+  bool _flashOn = false;
+  bool _isProcessingText = false;
+  TextRecognizer? _textRecognizer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kIsWeb) {
+      _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    }
+  }
+
+  @override
+  void dispose() {
+    _textRecognizer?.close();
+    super.dispose();
+  }
+
+  Future<void> _scanImage() async {
+    if (kIsWeb) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('L\'OCR n\'est pas disponible sur le Web')),
+        );
+      }
+      return;
+    }
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.camera);
+    if (image != null && mounted) {
+      _processImage(InputImage.fromFilePath(image.path));
+    }
+  }
+
+  Future<void> _processImage(InputImage inputImage) async {
+    if (_textRecognizer == null) return;
+    setState(() => _isProcessingText = true);
+    try {
+      final RecognizedText recognizedText =
+          await _textRecognizer!.processImage(inputImage);
+
+      String? foundCode;
+      // Regex flexible incluant le symbole ² pour les déprimigènes
+      final RegExp codeRegex = RegExp(r'^[A-Z0-9-²]{4,30}$');
+      
+      final List<String> blacklist = [
+        'IMAGE', 'IMG', 'DCIM', 'PHOTO', 'FILE', 'COPY', 'DATE', 
+        'REESSAYER', 'OK', 'MODIFIER', 'VALIDER', 'ANNULER', 
+        'SUPPRIMER', 'RETOUR', 'HISTORIQUE', 'INVENTAIRE', 'BMODIFIER'
+      ];
+
+      // Mots-clés prioritaires (LODEP, types de déprimigènes et surfaces)
+      final List<String> priorityKeywords = [
+        'LODEP', '3000', '1600', '500', '300', 'MEDGV', 'MEDPZR', 'M²', 'PI'
+      ];
+
+      List<String> candidates = [];
+
+      for (TextBlock block in recognizedText.blocks) {
+        for (TextLine line in block.lines) {
+          // Nettoyage : Majuscules, suppression espaces
+          String cleanText = line.text.trim().toUpperCase().replaceAll(' ', '');
+          
+          // On accepte à partir de 4 caractères (ex: 300M²)
+          if (cleanText.length < 4) continue;
+
+          bool isBlacklisted = false;
+          for (String word in blacklist) {
+            if (cleanText.contains(word)) {
+              isBlacklisted = true;
+              break;
+            }
+          }
+          if (isBlacklisted) continue;
+
+          if (codeRegex.hasMatch(cleanText) && RegExp(r'[A-Z0-9]').hasMatch(cleanText)) {
+            candidates.add(cleanText);
+          }
+        }
+      }
+
+      if (candidates.isNotEmpty) {
+        candidates.sort((a, b) {
+          // Priorité 1 : Mots-clés spécifiques (MEDGV, MEDPZR, m², etc.)
+          bool aIsPriority = priorityKeywords.any((k) => a.contains(k));
+          bool bIsPriority = priorityKeywords.any((k) => b.contains(k));
+          if (aIsPriority && !bIsPriority) return -1;
+          if (!aIsPriority && bIsPriority) return 1;
+
+          // Priorité 2 : Présence d'un tiret (ex: 3000M²-PI ou LODEPAMI...)
+          bool aHasDash = a.contains('-');
+          bool bHasDash = b.contains('-');
+          if (aHasDash && !bHasDash) return -1;
+          if (!aHasDash && bHasDash) return 1;
+          
+          // Priorité 3 : Longueur
+          return b.length.compareTo(a.length);
+        });
+        foundCode = candidates.first;
+      }
+
+      if (!mounted) return;
+
+      if (foundCode != null) {
+        HapticFeedback.mediumImpact();
+        Navigator.pop(context, foundCode);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Aucun matricule détecté (ex: GRA020)'),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Erreur OCR: $e");
+    } finally {
+      if (mounted) setState(() => _isProcessingText = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scanner un QR Code'),
+        title: const Text('Scanner Matériel'),
         backgroundColor: const Color(0xFF8EBB21),
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: Icon(_flashOn ? Icons.flash_on : Icons.flash_off),
+            onPressed: () {
+              widget.controller.toggleTorch();
+              setState(() => _flashOn = !_flashOn);
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.camera_alt),
+            tooltip: 'OCR (Reconnaissance de texte)',
+            onPressed: _isProcessingText ? null : _scanImage,
+          ),
+          IconButton(
+            icon: const Icon(Icons.keyboard),
+            tooltip: 'Saisie manuelle',
+            onPressed: () => _showManualEntry(context),
+          ),
+        ],
       ),
-      body: MobileScanner(
-        controller: controller,
-        onDetect: (capture) {
-          final List<Barcode> barcodes = capture.barcodes;
-          if (barcodes.isNotEmpty) {
-            final String? code = barcodes.first.rawValue;
-            if (code != null && code.isNotEmpty) {
-              Navigator.pop(context, code);
-            }
-          }
-        },
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: widget.controller,
+            onDetect: (capture) {
+              final List<Barcode> barcodes = capture.barcodes;
+              if (barcodes.isNotEmpty) {
+                final String? code = barcodes.first.rawValue;
+                if (code != null && code.isNotEmpty) {
+                  HapticFeedback.heavyImpact();
+                  Navigator.pop(context, code);
+                }
+              }
+            },
+          ),
+          if (_isProcessingText)
+            Container(
+              color: Colors.black45,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text('Analyse du texte en cours...', style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+            ),
+          // Overlay Pro avec coins de scan
+          IgnorePointer(
+            child: Center(
+              child: Container(
+                width: 250,
+                height: 250,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white38, width: 1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Stack(
+                  children: [
+                    _buildCorner(left: 0, top: 0),
+                    _buildCorner(right: 0, top: 0),
+                    _buildCorner(left: 0, bottom: 0),
+                    _buildCorner(right: 0, bottom: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 60,
+            left: 20,
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: const Text(
+                'Cadrez le QR Code ou utilisez l\'OCR pour le matricule',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCorner({double? left, double? top, double? right, double? bottom}) {
+    const side = BorderSide(color: Color(0xFF8EBB21), width: 4);
+    return Positioned(
+      left: left,
+      top: top,
+      right: right,
+      bottom: bottom,
+      child: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          border: Border(
+            top: top != null ? side : BorderSide.none,
+            left: left != null ? side : BorderSide.none,
+            right: right != null ? side : BorderSide.none,
+            bottom: bottom != null ? side : BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showManualEntry(BuildContext context) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Saisir le code'),
+        content: TextField(
+          controller: controller,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(hintText: "Ex: GRA001"),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () {
+              final val = controller.text.trim().toUpperCase();
+              if (val.isNotEmpty) {
+                Navigator.pop(ctx);
+                Navigator.pop(context, val);
+              }
+            },
+            child: const Text('Valider'),
+          ),
+        ],
       ),
     );
   }
@@ -1253,7 +1614,7 @@ class _MultiQRScannerScreenState extends State<MultiQRScannerScreen> {
         actions: [
           if (_scannedCodes.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.check),
+              icon: const Icon(Icons.check_circle, size: 28),
               onPressed: () => Navigator.pop(context, _scannedCodes),
             )
         ],
@@ -1277,6 +1638,44 @@ class _MultiQRScannerScreenState extends State<MultiQRScannerScreen> {
               }
             },
           ),
+          // Overlay Pro avec coins de scan (Identique au scan unique)
+          IgnorePointer(
+            child: Center(
+              child: Container(
+                width: 250,
+                height: 250,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white38, width: 1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Stack(
+                  children: [
+                    _buildCorner(left: 0, top: 0),
+                    _buildCorner(right: 0, top: 0),
+                    _buildCorner(left: 0, bottom: 0),
+                    _buildCorner(right: 0, bottom: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 140,
+            left: 20,
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: const Text(
+                'Scannez plusieurs matériels à la suite',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ),
+          ),
           Positioned(
             bottom: 20,
             left: 20,
@@ -1285,13 +1684,14 @@ class _MultiQRScannerScreenState extends State<MultiQRScannerScreen> {
               height: 100,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(12),
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white24),
               ),
               child: _scannedCodes.isEmpty
                   ? const Center(
-                      child: Text('Scannez vos matériels...',
-                          style: TextStyle(color: Colors.white)))
+                      child: Text('Aucun scan en cours...',
+                          style: TextStyle(color: Colors.white70)))
                   : ListView.builder(
                       scrollDirection: Axis.horizontal,
                       itemCount: _scannedCodes.length,
@@ -1299,7 +1699,11 @@ class _MultiQRScannerScreenState extends State<MultiQRScannerScreen> {
                         return Padding(
                           padding: const EdgeInsets.only(right: 8.0),
                           child: Chip(
-                            label: Text(_scannedCodes[index]),
+                            backgroundColor: const Color(0xFF8EBB21).withOpacity(0.2),
+                            side: const BorderSide(color: Color(0xFF8EBB21)),
+                            label: Text(_scannedCodes[index], 
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            deleteIconColor: Colors.white,
                             onDeleted: () =>
                                 setState(() => _scannedCodes.removeAt(index)),
                           ),
@@ -1309,6 +1713,28 @@ class _MultiQRScannerScreenState extends State<MultiQRScannerScreen> {
             ),
           )
         ],
+      ),
+    );
+  }
+
+  Widget _buildCorner({double? left, double? top, double? right, double? bottom}) {
+    const side = BorderSide(color: Color(0xFF8EBB21), width: 4);
+    return Positioned(
+      left: left,
+      top: top,
+      right: right,
+      bottom: bottom,
+      child: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          border: Border(
+            top: top != null ? side : BorderSide.none,
+            left: left != null ? side : BorderSide.none,
+            right: right != null ? side : BorderSide.none,
+            bottom: bottom != null ? side : BorderSide.none,
+          ),
+        ),
       ),
     );
   }
@@ -1393,43 +1819,85 @@ class _MultiScanSummaryDialogState extends State<MultiScanSummaryDialog> {
   }
 
   Future<void> _processItem(String code) async {
-    final sanitizedId = code.replaceAll('/', '_').replaceAll(' ', '_');
-
-    final doc = await FirebaseFirestore.instance
+    // On cherche tous les matériels qui ont ce code QR
+    final querySnapshot = await FirebaseFirestore.instance
         .collection('localog_inventory')
-        .doc(sanitizedId)
+        .where('qrCode', isEqualTo: code)
         .get();
 
-    if (mounted) {
-      final result = await showDialog<bool>(
+    if (!mounted) return;
+
+    if (querySnapshot.docs.isEmpty) {
+      // Nouveau matériel
+      _openForm(code, false, null);
+    } else if (querySnapshot.docs.length == 1) {
+      // Un seul matériel trouvé, on l'ouvre
+      final doc = querySnapshot.docs.first;
+      _openForm(code, true, doc.data());
+    } else {
+      // Plusieurs matériels ont le même code GRA !
+      // On demande à l'utilisateur lequel il veut traiter
+      showDialog(
         context: context,
-        barrierDismissible: false,
-        builder: (ctx) => InventoryFormDialog(
-          qrCode: sanitizedId,
-          isExisting: doc.exists,
-          initialData: doc.data(),
-          userId: widget.userId,
-          materiels: widget.materiels,
-          batchLocal: widget.local,
-          batchTR: widget.tr,
-          isAdmin: widget.isAdmin,
+        builder: (ctx) => AlertDialog(
+          title: Text('Plusieurs matériels pour $code'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: querySnapshot.docs.map((doc) {
+              final data = doc.data();
+              return ListTile(
+                title: Text(data['materiel'] ?? 'Inconnu'),
+                subtitle: Text('Local: ${data['local'] ?? '?'}'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openForm(code, true, data);
+                },
+              );
+            }).toList()
+              ..add(ListTile(
+                leading: const Icon(Icons.add),
+                title: const Text('Créer pour un autre matériel'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openForm(code, false, null);
+                },
+              )),
+          ),
         ),
       );
+    }
+  }
 
-      if (result == true) {
-        setState(() {
-          _allCodes.remove(code);
-        });
+  Future<void> _openForm(
+      String code, bool isExisting, Map<String, dynamic>? data) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => InventoryFormDialog(
+        qrCode: code,
+        isExisting: isExisting,
+        initialData: data,
+        userId: widget.userId,
+        materiels: widget.materiels,
+        batchLocal: widget.local,
+        batchTR: widget.tr,
+        isAdmin: widget.isAdmin,
+      ),
+    );
 
-        if (_allCodes.isEmpty && mounted) {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Batch terminé avec succès'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+    if (result == true) {
+      setState(() {
+        _allCodes.remove(code);
+      });
+
+      if (_allCodes.isEmpty && mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Batch terminé avec succès'),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
     }
   }
@@ -1625,9 +2093,11 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
   Future<void> _saveInventory() async {
     final qrCodeToSave = _qrController.text.trim();
     if (qrCodeToSave.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Le QR Code ne peut pas être vide')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Le QR Code ne peut pas être vide')),
+        );
+      }
       return;
     }
 
@@ -1642,49 +2112,60 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
     // Validation
     if (_selectedMateriel == 'Autre → Préciser' &&
         _customMaterialController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Veuillez préciser le matériel'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Veuillez préciser le matériel'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       return;
     }
 
     if (_selectedRetour == null) {
       if (localValue.isEmpty || _selectedTR == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Le local et la TR sont obligatoires'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Le local et la TR sont obligatoires'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
         return;
       }
     }
 
     if (_isSpecialMaterial && dedValue.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Le Débit de Dose (DeD) est obligatoire pour ce matériel'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Le Débit de Dose (DeD) est obligatoire pour ce matériel'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       return;
     }
 
-    if (qrCodeToSave != widget.qrCode) {
+    if (qrCodeToSave != widget.qrCode ||
+        finalMateriel != (widget.initialData?['materiel'] ?? '')) {
+      // On vérifie si ce couple Matériel + Code existe déjà
+      final docId = "${finalMateriel}_$qrCodeToSave"
+          .replaceAll(' ', '_')
+          .replaceAll('/', '_');
       final existingDoc = await FirebaseFirestore.instance
           .collection('localog_inventory')
-          .doc(qrCodeToSave)
+          .doc(docId)
           .get();
-      if (existingDoc.exists) {
+
+      if (existingDoc.exists && !widget.isExisting) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content:
-                  Text('Ce QR Code est déjà utilisé par un autre matériel'),
+              content: Text('Ce matériel avec ce code est déjà enregistré.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -1694,12 +2175,14 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
     }
 
     if (_isHS && motifHSValue.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Veuillez renseigner le motif HS'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Veuillez renseigner le motif HS'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       return;
     }
 
@@ -1755,7 +2238,6 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
             'new': finalMateriel
           };
         }
-        // ... (suite des changements existants)
         if (widget.initialData!['local'] != localValue) {
           changes['local'] = {
             'old': widget.initialData!['local'],
@@ -1861,12 +2343,23 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
       }
 
       // Enregistrer dans Firestore
+      // L'ID du document est maintenant Materiel_Code pour permettre les doublons de code sur des matériels différents
+      final docId = "${finalMateriel}_$qrCodeToSave"
+          .replaceAll(' ', '_')
+          .replaceAll('/', '_');
+
       await firestore
           .collection('localog_inventory')
-          .doc(qrCodeToSave)
+          .doc(docId)
           .set(inventoryData, SetOptions(merge: true));
 
-      if (qrCodeToSave != widget.qrCode) {
+      // Si l'ancien ID était différent (changement de code ou de type), on le supprime (optionnel selon votre besoin de migration)
+      final oldId = "${widget.initialData?['materiel'] ?? ''}_${widget.qrCode}"
+          .replaceAll(' ', '_')
+          .replaceAll('/', '_');
+      if (widget.isExisting && oldId != docId) {
+        // On vérifie si l'ancien ID était juste le QR code (ancien format)
+        await firestore.collection('localog_inventory').doc(oldId).delete();
         await firestore
             .collection('localog_inventory')
             .doc(widget.qrCode)
@@ -1938,10 +2431,28 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                                 onPressed: () async {
                                   Navigator.pop(ctx);
                                   Navigator.pop(context);
+                                  
+                                  // On cherche les documents par qrCode pour être sûr de tout supprimer si besoin
+                                  // ou on supprime l'ID spécifique si on veut être précis.
+                                  // Ici on va supprimer l'ID composé calculé pour être exact sur ce qu'on voit à l'écran.
+                                  final finalMateriel = _selectedMateriel == 'Autre → Préciser'
+                                      ? 'Autre : ${_customMaterialController.text.trim()}'
+                                      : _selectedMateriel;
+                                  final docId = "${finalMateriel}_${widget.qrCode}"
+                                      .replaceAll(' ', '_')
+                                      .replaceAll('/', '_');
+                                  
+                                  await FirebaseFirestore.instance
+                                      .collection('localog_inventory')
+                                      .doc(docId)
+                                      .delete();
+
+                                  // Par sécurité on essaie aussi l'ancien ID (qrCode simple)
                                   await FirebaseFirestore.instance
                                       .collection('localog_inventory')
                                       .doc(widget.qrCode)
                                       .delete();
+
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
                                       content:
@@ -1986,17 +2497,19 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
               ),
               const SizedBox(height: 15),
               // Sélection de matériel
-              const Text(
-                'Matériel*',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              DropdownButton<String>(
-                isExpanded: true,
-                // On s'assure que la valeur existe exactement une fois dans la liste affichée
-                value: _filteredMateriels.contains(_selectedMateriel)
+              DropdownButtonFormField<String>(
+                key: ValueKey('material_$_selectedMateriel'),
+                initialValue: _filteredMateriels.contains(_selectedMateriel)
                     ? _selectedMateriel
                     : null,
+                decoration: InputDecoration(
+                  labelText: 'Matériel*',
+                  labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                isExpanded: true,
                 items: _filteredMateriels.toSet().map((m) {
                   return DropdownMenuItem<String>(
                     value: m,
@@ -2010,7 +2523,6 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                     });
                   }
                 },
-                hint: const Text('Sélectionner un matériel'),
               ),
               if (_selectedMateriel == 'Autre → Préciser') ...[
                 const SizedBox(height: 8),
@@ -2101,8 +2613,8 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                         ),
                         const SizedBox(height: 8),
                         DropdownButtonFormField<String>(
+                          initialValue: _selectedTR,
                           isExpanded: true,
-                          value: _selectedTR,
                           decoration: InputDecoration(
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -2140,8 +2652,8 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                initialValue: _selectedRetour,
                 isExpanded: true,
-                value: _selectedRetour,
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -2376,12 +2888,12 @@ class _InventoryFormDialogState extends State<InventoryFormDialog> {
                                     Text(
                                       '$displayDate par ${data['modifiedBy']?['prenom'] ?? data['createdBy']?['prenom'] ?? ''} ${data['modifiedBy']?['nom'] ?? data['createdBy']?['nom'] ?? ''}',
                                       style: const TextStyle(
-                                          fontSize: 10,
+                                          fontSize: 11,
                                           fontWeight: FontWeight.bold),
                                     ),
                                     ...details.map((d) => Text(
                                           '• $d',
-                                          style: const TextStyle(fontSize: 9),
+                                          style: const TextStyle(fontSize: 10),
                                         )),
                                   ],
                                 ),

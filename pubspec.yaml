@@ -28,6 +28,8 @@ dependencies:
   intl: ^0.20.2  # Obligatoire pour le formatage des dates qu'on a ajouté
   csv: ^6.0.0
   mobile_scanner: ^6.0.0
+  google_mlkit_text_recognition: ^0.13.0
+  image_picker: ^1.1.2
 
 
 

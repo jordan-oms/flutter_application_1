@@ -7,6 +7,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'model/activity_logger.dart';
+import 'model/activity_navigator_observer.dart';
+
 // Imports des écrans existants
 import 'screens/role_selection_screen.dart';
 import 'screens/home_screen.dart';
@@ -16,7 +19,7 @@ import 'firebase_options.dart';
 import 'screens/ajouter_repere_screen.dart';
 import 'screens/detail_repere_screen.dart';
 
-const String DEPLOYMENT_ID = "4.0";
+const String DEPLOYMENT_ID = "4.1";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,12 +29,42 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   static FirebaseAnalytics analytics = FirebaseAnalytics.instance;
   static FirebaseAnalyticsObserver observer =
       FirebaseAnalyticsObserver(analytics: analytics);
+  static ActivityNavigatorObserver activityObserver =
+      ActivityNavigatorObserver();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    debugPrint("📱 AppLifecycleState: $state");
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      ActivityLogger().endSession();
+    } else if (state == AppLifecycleState.resumed) {
+      ActivityLogger().startSession();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +72,7 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Gestion Chantier',
       theme: ThemeData(primarySwatch: Colors.blue),
-      navigatorObservers: <NavigatorObserver>[observer],
+      navigatorObservers: <NavigatorObserver>[observer, activityObserver],
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -81,6 +114,7 @@ class AuthWrapper extends StatelessWidget {
 
   Future<void> _setupAnalytics(User user) async {
     try {
+      await ActivityLogger().startSession();
       final doc = await FirebaseFirestore.instance
           .collection('utilisateurs')
           .doc(user.uid)

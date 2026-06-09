@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../model/activity_logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'creation_de_compte.dart';
@@ -87,6 +88,7 @@ class _LoginChantierScreenState extends State<LoginChantierScreen>
           .get();
 
       if (!userDoc.exists || userDoc.data()?['statut'] != 'valide') {
+        await ActivityLogger().endSession();
         await FirebaseAuth.instance.signOut();
         _showSnack(userDoc.exists
             ? "Votre compte n'a pas encore été validé par un administrateur."

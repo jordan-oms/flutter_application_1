@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart' as fs;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart'; // Pour accéder à la constante DEPLOYMENT_ID
+import '../model/activity_logger.dart';
 import 'home_screen.dart';
 import 'login_chantier_screen.dart';
 import 'chantier_plus_screen.dart';
@@ -44,6 +45,7 @@ class RoleSelectionScreen extends StatefulWidget {
 
   // Méthode pour se déconnecter réellement
   static Future<void> forceSignOut(BuildContext context) async {
+    await ActivityLogger().endSession();
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {
       Navigator.pushAndRemoveUntil(
@@ -160,6 +162,7 @@ class RoleSelectionScreenState extends State<RoleSelectionScreen> {
             (Route<dynamic> route) => false);
         return;
       } else {
+        await ActivityLogger().endSession();
         await FirebaseAuth.instance.signOut();
       }
     }

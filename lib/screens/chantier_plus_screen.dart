@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../model/activity_logger.dart';
 
 class ChantierPlusScreen extends StatefulWidget {
   const ChantierPlusScreen({super.key});
@@ -245,7 +246,14 @@ class _ChantierPlusScreenState extends State<ChantierPlusScreen> {
       showCheckmark: false,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       onSelected: (val) {
-        if (val) setState(() => selectedTranche = digit);
+        if (val) {
+          setState(() => selectedTranche = digit);
+          // Log du changement de tranche
+          ActivityLogger().logPageView(
+            "CAPILog : Changement de tranche",
+            tranche: digit,
+          );
+        }
       },
     );
   }

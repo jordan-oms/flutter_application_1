@@ -17,6 +17,7 @@ import '../model/consigne_service.dart';
 // Importez vos autres écrans
 import './role_selection_screen.dart';
 import './admin/manage_tranches_screen.dart';
+import './admin/user_tracking_screen.dart';
 import 'archive_screen.dart';
 import 'dosimetrie_dialog.dart';
 import 'gerer_les_utilisateur.dart';
@@ -27,6 +28,7 @@ import './localog_screen.dart';
 // ... (vos imports existants)
 import '../widgets/tranche_selector.dart';
 import '../main.dart';
+import '../model/activity_logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'detail_repere_screen.dart';
@@ -141,6 +143,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedTranche;
   String? _favoriteTranche;
   List<String> _tranches = [];
+  StreamSubscription<DocumentSnapshot>? _tranchesSubscription;
 
   final FocusNode _ajoutConsigneFocusNode = FocusNode();
 
@@ -213,9 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_isReadOnly) {
       _safelySetState(
           () => _loadingState = HomeScreenLoadingState.loadingTranches);
-      _loadTranches().then((_) {
-        _safelySetState(() => _loadingState = HomeScreenLoadingState.ready);
-      });
+      _setupTranchesListener();
     } else {
       // Sinon, on lance le processus de vérification complet comme avant.
       _checkVersionAndInitialize();
@@ -310,6 +311,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _tranchesSubscription?.cancel();
     _infosPopupTimer?.cancel();
     _ajoutConsigneFocusNode.dispose();
     _consigneController.dispose();
@@ -928,7 +930,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Pour l'instant on garde la sélection de la navigation initiale.
       }
 
-      await _loadTranches();
+      _setupTranchesListener();
     } catch (e) {
       if (mounted) {
         _safelySetState(() => _loadingState = HomeScreenLoadingState.error);
@@ -940,6 +942,78 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     stopwatch.stop();
+  }
+
+  void _setupTranchesListener() {
+    _tranchesSubscription?.cancel();
+    _tranchesSubscription =
+        _tranchesConfigRef.snapshots().listen((tranchesDoc) {
+      if (!mounted) return;
+
+      if (tranchesDoc.exists && tranchesDoc.data() != null) {
+        var data = tranchesDoc.data() as Map<String, dynamic>;
+        if (data['liste_tranches'] is List) {
+          List<String> allTranches = List<String>.from(
+              data['liste_tranches'].map((item) => item.toString()));
+
+          List<String> newFilteredTranches = [];
+          // Filtrage des tranches masquées pour les non-admins
+          if (!_userRoles.contains(roleAdminString)) {
+            List<String> tranchesMasquees = [];
+            if (data['tranches_masquees'] is List) {
+              tranchesMasquees = List<String>.from(
+                  data['tranches_masquees'].map((item) => item.toString()));
+            }
+            newFilteredTranches = allTranches
+                .where((t) => !tranchesMasquees.contains(t))
+                .toList();
+          } else {
+            newFilteredTranches = allTranches;
+          }
+
+          _safelySetState(() {
+            _tranches = newFilteredTranches;
+
+            // Si la tranche actuellement sélectionnée n'est plus disponible (masquée pour un non-admin)
+            if (_selectedTranche != null &&
+                !_tranches.contains(_selectedTranche)) {
+              debugPrint(
+                  "La tranche '$_selectedTranche' n'est plus disponible. Recherche d'un fallback...");
+              // Fallback
+              if (_favoriteTranche != null &&
+                  _tranches.contains(_favoriteTranche)) {
+                _selectedTranche = _favoriteTranche;
+              } else if (_tranches.isNotEmpty) {
+                _selectedTranche = _tranches.first;
+              } else {
+                _selectedTranche = null;
+              }
+              // On doit aussi recharger les streams dépendants de la tranche
+              _setupTransfertsBadgeListener();
+              _consignesCache.clear();
+            } else if (_selectedTranche == null && _tranches.isNotEmpty) {
+              // Initialisation si rien n'était sélectionné
+              if (_favoriteTranche != null &&
+                  _tranches.contains(_favoriteTranche)) {
+                _selectedTranche = _favoriteTranche;
+              } else {
+                _selectedTranche = _tranches.first;
+              }
+              _setupTransfertsBadgeListener();
+            }
+
+            _loadingState = HomeScreenLoadingState.ready;
+          });
+        }
+      }
+    }, onError: (e) {
+      if (mounted) {
+        _safelySetState(() => _loadingState = HomeScreenLoadingState.error);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Erreur de synchronisation des tranches: $e")),
+        );
+      }
+    });
   }
 
   Future<void> _loadTranches() async {
@@ -957,8 +1031,23 @@ class _HomeScreenState extends State<HomeScreen> {
       if (tranchesDoc.exists && tranchesDoc.data() != null) {
         var data = tranchesDoc.data() as Map<String, dynamic>;
         if (data['liste_tranches'] is List) {
-          _tranches = List<String>.from(
+          List<String> allTranches = List<String>.from(
               data['liste_tranches'].map((item) => item.toString()));
+
+          // Filtrage des tranches masquées pour les non-admins
+          if (!_userRoles.contains(roleAdminString)) {
+            List<String> tranchesMasquees = [];
+            if (data['tranches_masquees'] is List) {
+              tranchesMasquees = List<String>.from(
+                  data['tranches_masquees'].map((item) => item.toString()));
+            }
+            _tranches = allTranches
+                .where((t) => !tranchesMasquees.contains(t))
+                .toList();
+          } else {
+            _tranches = allTranches;
+          }
+
           if (_tranches.isNotEmpty) {
             if (_favoriteTranche != null &&
                 _tranches.contains(_favoriteTranche)) {
@@ -1322,6 +1411,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showConsigneDetailsPopup(String consigneId) async {
+    // Log de la consultation
+    ActivityLogger().logPageView(
+      "${_interfaceType.toUpperCase()} : Détail consigne",
+      tranche: _selectedTranche,
+    );
+
     // Avec la collection unique, on ne cherche que dans '${prefix}consignes'
     final String prefix = _interfaceType == 'amcr' ? 'amcr_' : '';
     DocumentSnapshot doc =
@@ -2438,6 +2533,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (storedDeploymentId != DEPLOYMENT_ID) {
         debugPrint(
             "Nouvelle version détectée (actuelle: $DEPLOYMENT_ID, stockée: $storedDeploymentId). Déconnexion forcée.");
+        await ActivityLogger().endSession();
         await FirebaseAuth.instance.signOut();
         await prefs.clear();
         await prefs.setString('deployment_id', DEPLOYMENT_ID);
@@ -2909,9 +3005,6 @@ class _HomeScreenState extends State<HomeScreen> {
             MaterialPageRoute(
                 builder: (routeContext) => const ManageTranchesScreen()),
           );
-
-          if (!mounted) return;
-          _loadTranches();
         }
       } else {
         if (!mounted) return;
@@ -2954,6 +3047,12 @@ class _HomeScreenState extends State<HomeScreen> {
             .clear(); // Vider le cache pour forcer le rafraîchissement
       });
       _setupTransfertsBadgeListener();
+
+      // Log du changement de tranche
+      ActivityLogger().logPageView(
+        "${_interfaceType.toUpperCase()} : Changement de tranche",
+        tranche: nouvelleTranche,
+      );
     }
   }
 
@@ -3088,7 +3187,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         builder: (context) => const ManageTranchesScreen(),
                         settings:
                             const RouteSettings(name: '/manage_tranches')),
-                  ).then((_) => _loadTranches());
+                  );
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: appBarColor,
@@ -3107,6 +3206,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (context) => const GererLesUtilisateursScreen(),
                       settings:
                           const RouteSettings(name: '/gerer_utilisateurs'),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: appBarColor,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(200, 50),
+                ),
+              ),
+              const SizedBox(height: 15),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.analytics_outlined),
+                label: const Text("Suivi d'activité"),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const UserTrackingScreen(),
+                      settings: const RouteSettings(name: '/user_tracking'),
                     ),
                   );
                 },
@@ -3368,6 +3486,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       });
                       _setupTransfertsBadgeListener();
 
+                      // Log du changement de tranche via sélecteur favori
+                      ActivityLogger().logPageView(
+                        "${_interfaceType.toUpperCase()} : Changement de tranche",
+                        tranche: nouvelleTranche,
+                      );
+
                       // Optionnel : On peut aussi mettre à jour localement le favori
                       // si le widget TrancheSelector le modifie en base.
                       DocumentSnapshot userDoc = await _firestore
@@ -3414,6 +3538,13 @@ class _HomeScreenState extends State<HomeScreen> {
           _safelySetState(() {
             _currentIndex = index;
           });
+
+          // Log de l'activité avec la tranche actuelle
+          final String pageName = navBarItems[index].label ?? "Inconnue";
+          ActivityLogger().logPageView(
+            "${_interfaceType.toUpperCase()} : $pageName",
+            tranche: _selectedTranche,
+          );
 
           // Plus de marquage automatique des infos comme lues
           // Le badge reste affiché jusqu'à ce que chaque info soit marquée comme lue individuellement
